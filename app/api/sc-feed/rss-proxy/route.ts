@@ -133,7 +133,7 @@ export async function GET(req: Request) {
 
     const sourceLabel = searchParams.get('label') ?? parsedUrl.hostname
     const { feedTitle, messages } = parseFeed(xml, sourceLabel)
-    return NextResponse.json({ feedTitle, messages })
+    return NextResponse.json({ feedTitle, messages }, { headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=300' } })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 })
   }

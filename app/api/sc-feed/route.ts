@@ -199,7 +199,7 @@ export async function GET() {
       return { id: ch.id, label: ch.label, file: ch.id, messages, updated_at: messages[0]?.ts_raw ?? recs[0]?.ts_raw ?? null, rsiStatus }
     })
 
-    return NextResponse.json(channels)
+    return NextResponse.json(channels, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } })
   } catch (err) {
     return NextResponse.json(
       CHANNEL_ORDER.map(ch => ({

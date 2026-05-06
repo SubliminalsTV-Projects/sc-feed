@@ -111,7 +111,7 @@ export async function GET(req: Request) {
       channelName = r.name
     }
     const messages = await fetchChannelVideos(channelId, channelName)
-    return NextResponse.json({ channelId, name: channelName, messages })
+    return NextResponse.json({ channelId, name: channelName, messages }, { headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=300' } })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 })
   }
