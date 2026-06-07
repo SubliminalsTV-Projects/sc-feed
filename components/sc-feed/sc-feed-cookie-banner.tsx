@@ -27,7 +27,7 @@ export function CookieBanner() {
       <div className="max-w-3xl mx-auto flex items-start sm:items-center gap-3">
         <Cookie className="w-5 h-5 text-primary-container shrink-0 mt-0.5 sm:mt-0" />
         <p className="flex-1 text-[11px] sm:text-[12px] font-body text-on-surface-variant leading-relaxed">
-          SC Feed stores your layout, read state, and custom feeds in your browser only. No analytics, no trackers, no third-party services.{' '}
+          SC Feed stores your layout, read state, and custom feeds in your browser only. We use Google Analytics for anonymous usage stats — no ad networks, no profile selling.{' '}
           <Link href="/privacy" className="text-primary-container hover:underline">Learn more</Link>
         </p>
         <button

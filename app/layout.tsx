@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from 'next'
 import { Space_Grotesk, Inter } from 'next/font/google'
+import { GoogleAnalytics } from '@next/third-parties/google'
 import './globals.css'
+
+const gaId = process.env.NEXT_PUBLIC_GA_ID
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -40,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="h-screen overflow-hidden flex flex-col bg-background">
           {children}
         </div>
+        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
       </body>
     </html>
   )

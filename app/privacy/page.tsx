@@ -26,9 +26,10 @@ export default function PrivacyPage() {
 
         <Section title="TL;DR">
           <p>
-            SC Feed stores your preferences in your browser. We don&apos;t track you, don&apos;t use analytics,
-            don&apos;t sell your data, and don&apos;t share anything with third parties. Push notifications are
-            optional and only sent for new feed activity.
+            SC Feed stores your preferences in your browser. We use Google Analytics for anonymous,
+            aggregate usage stats (which pages get visited, roughly how many people use the app) &mdash;
+            but we don&apos;t sell your data, don&apos;t run ads, and don&apos;t build a profile on you.
+            Push notifications are optional and only sent for new feed activity.
           </p>
         </Section>
 
@@ -62,11 +63,24 @@ export default function PrivacyPage() {
           </ul>
         </Section>
 
+        <Section title="Analytics">
+          <p>
+            SC Feed uses <strong>Google Analytics 4</strong> to understand how the app is used in aggregate
+            &mdash; page views, rough visitor counts, browser and device type, approximate region. This helps
+            decide what to build and fix next. Google sets a couple of cookies (<code>_ga</code>, <code>_ga_*</code>)
+            and your browser loads its <code>gtag.js</code> script from <code>googletagmanager.com</code>.
+          </p>
+          <p>
+            We don&apos;t enable Google&apos;s advertising features, don&apos;t use it to build an advertising
+            profile, and don&apos;t share the data with anyone. You can block it with most ad/tracker blockers
+            or your browser&apos;s &ldquo;Do Not Track&rdquo; / privacy settings, and SC Feed will work exactly the same.
+          </p>
+        </Section>
+
         <Section title="What we don't do">
           <ul>
-            <li>No analytics services (Google Analytics, Plausible, Fathom, etc.)</li>
-            <li>No third-party trackers, pixels, or ad networks</li>
-            <li>No cookies for advertising or behavioral tracking</li>
+            <li>No advertising networks, ad pixels, or retargeting</li>
+            <li>No Google Analytics advertising features (no ad personalization, no Google Signals)</li>
             <li>No selling, sharing, renting, or licensing of any user data</li>
             <li>No fingerprinting, no cross-site tracking</li>
           </ul>
