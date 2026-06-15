@@ -51,6 +51,7 @@ const CHANNEL_ORDER = [
   { id: 'sc-news',               label: 'SC News - Pipeline',    channel_id: '1484315008216207450' },
   { id: 'patch-news',            label: 'Patch News - Pipeline', channel_id: '1484315784816627903' },
   { id: 'cig-news',              label: 'CIG - Tracker SC',      channel_id: '933047593666236487'  },
+  { id: 'twitter-rsi',           label: 'RSI Twitter',           channel_id: 'twitter-rsi'          },
   { id: 'sc-leaks',              label: 'SC Leaks - Pipeline',   channel_id: '1484315527416647802' },
   // RSI Spectrum official CIG-only forums — merged into one feed
   { id: 'spectrum-cig',          label: 'Spectrum',              channel_id: 'spectrum-cig'         },
