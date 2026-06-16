@@ -61,7 +61,9 @@ export function MessageModal({ msg, channelId, onClose }: {
   return createPortal(
     <div
       className="fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
+      // Portaled modals re-route events through the React tree, so a backdrop click
+      // would otherwise bubble to the card's onClick and immediately reopen this.
+      onClick={e => { e.stopPropagation(); onClose() }}
     >
       <div
         onClick={e => e.stopPropagation()}

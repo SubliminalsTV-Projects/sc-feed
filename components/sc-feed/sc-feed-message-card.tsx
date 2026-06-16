@@ -630,7 +630,7 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
     {lightboxOpen && createPortal(
       <div
         className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center"
-        onClick={() => setLightboxOpen(false)}
+        onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
       >
         <button
           onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
