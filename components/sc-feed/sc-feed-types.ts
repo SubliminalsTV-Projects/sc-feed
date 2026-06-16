@@ -79,33 +79,37 @@ export interface LayoutPreset {
   isDefault?: boolean
 }
 
+// `twitter-rsi` (RSI's official @RobertsSpaceInd, written by Sub's Minion) is a MERGE-ONLY
+// source by default: it flows into the OmniFeed (omniSourceToggles, independent of panels)
+// but ships hidden as a standalone panel in every default preset, so it doesn't sit as its
+// own column next to the OmniFeed. It's still in columnOrder so a user can unhide it.
 export const DEFAULT_PRESETS: LayoutPreset[] = [
   {
     id: 'default-16-9-all',
     name: '16:9 All',
     isDefault: true,
-    columnOrder: ['__omni_feed', '__motd_unified', 'rsi-status', 'spectrum-cig', 'sc-youtube', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'subliminalstv', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
-    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'rsi-status': 'medium', 'spectrum-cig': 'medium', 'sc-youtube': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'narrow', 'sc-leaks': 'medium', 'subliminalstv': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
-    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'quarter', 'rsi-status': 'third', 'spectrum-cig': 'third', 'sc-youtube': 'third', 'sc-news': 'half', 'patch-news': 'half', 'cig-news': 'full', 'sc-leaks': 'half', 'subliminalstv': 'half', 'sc-yt-creators': 'half', 'sc-twitch-creators': 'quarter', 'sc-custom-rss': 'quarter' },
-    hiddenChannels: ['__motd_unified'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'rsi-status', 'spectrum-cig', 'twitter-rsi', 'sc-youtube', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'subliminalstv', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'rsi-status': 'medium', 'spectrum-cig': 'medium', 'twitter-rsi': 'medium', 'sc-youtube': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'narrow', 'sc-leaks': 'medium', 'subliminalstv': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
+    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'quarter', 'rsi-status': 'third', 'spectrum-cig': 'third', 'twitter-rsi': 'half', 'sc-youtube': 'third', 'sc-news': 'half', 'patch-news': 'half', 'cig-news': 'full', 'sc-leaks': 'half', 'subliminalstv': 'half', 'sc-yt-creators': 'half', 'sc-twitch-creators': 'quarter', 'sc-custom-rss': 'quarter' },
+    hiddenChannels: ['__motd_unified', 'twitter-rsi'],
   },
   {
     id: 'default-9-16-omni',
     name: '9:16 OmniFeed',
     isDefault: true,
-    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
     columnWidths: { '__omni_feed': 'wide' },
     columnHeights: { '__omni_feed': 'full' },
-    hiddenChannels: ['__motd_unified', 'spectrum-cig', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    hiddenChannels: ['__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
   },
   {
     id: 'default-reset',
     name: 'Reset',
     isDefault: true,
-    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
-    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'spectrum-cig': 'medium', 'rsi-status': 'medium', 'sc-youtube': 'medium', 'subliminalstv': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'medium', 'sc-leaks': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
-    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'full', 'spectrum-cig': 'full', 'rsi-status': 'full', 'sc-youtube': 'full', 'subliminalstv': 'full', 'sc-news': 'full', 'patch-news': 'full', 'cig-news': 'full', 'sc-leaks': 'full', 'sc-yt-creators': 'full', 'sc-twitch-creators': 'full', 'sc-custom-rss': 'full' },
-    hiddenChannels: ['sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'spectrum-cig': 'medium', 'twitter-rsi': 'medium', 'rsi-status': 'medium', 'sc-youtube': 'medium', 'subliminalstv': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'medium', 'sc-leaks': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
+    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'full', 'spectrum-cig': 'full', 'twitter-rsi': 'full', 'rsi-status': 'full', 'sc-youtube': 'full', 'subliminalstv': 'full', 'sc-news': 'full', 'patch-news': 'full', 'cig-news': 'full', 'sc-leaks': 'full', 'sc-yt-creators': 'full', 'sc-twitch-creators': 'full', 'sc-custom-rss': 'full' },
+    hiddenChannels: ['twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
   },
 ]
 

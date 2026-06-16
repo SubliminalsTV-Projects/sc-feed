@@ -551,6 +551,7 @@ export function ScFeedView() {
       MOTD_UNIFIED_ID,
       'rsi-status',
       'spectrum-cig',
+      'twitter-rsi',
       'sc-youtube',
       'sc-news',
       'patch-news',
