@@ -4,6 +4,7 @@ import {
   DISCORD_CHANNELS,
   DISCORD_TOKEN,
   RSI_TOKEN,
+  fetchCommLinkImage,
   fetchRedditBody,
   fetchRedditDevComment,
   fetchSpectrumThreadBodyByUrl,
@@ -82,6 +83,13 @@ export async function GET(request: Request) {
               const result = await fetchSpectrumThreadBodyByUrl(parsed.url)
               parsed.body  = result.body
               if (result.image && !parsed.image) parsed.image = result.image
+            }
+            // Comm-Link cards: body is client-rendered (unfetchable) and the bot stub's
+            // share image 404s. Pull the article's real hero image from the page's og:image
+            // so the card has visual context. Best-effort — leave the stub image on failure.
+            if (/\/comm-link\/transmission\//.test(parsed.url ?? '')) {
+              const heroImg = await fetchCommLinkImage(parsed.url!)
+              if (heroImg) parsed.image = heroImg
             }
             // Knowledge Base [Updated] cards link to Zendesk articles — generate a
             // change diff against our last snapshot (idempotent per msg_id). Best-effort:

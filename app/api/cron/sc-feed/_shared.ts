@@ -1064,6 +1064,29 @@ async function fetchZendeskArticle(id: string, locale: string): Promise<{ body: 
   } catch { return null }
 }
 
+// TrackerSC Comm-Link cards (This Week in Star Citizen, Behind the Ships, etc.) point at
+// an RSI comm-link whose body is client-rendered (no API), and the bot stub carries a
+// dead share-image URL. The article page does expose a real per-article hero via og:image
+// though — a meta tag present in the static HTML. We grab it and upgrade the tiny
+// `heap_thumb` rendition to the full-size `post` rendition on RSI's media CDN.
+export async function fetchCommLinkImage(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': SPECTRUM_HEADERS['User-Agent'], 'Accept': 'text/html' } })
+    if (!res.ok) return ''
+    const html = await res.text()
+    const m = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i)
+    if (!m) return ''
+    let img = m[1].trim()
+    // RSI media CDN serves several renditions per asset; og:image is a 61px thumb.
+    if (/media\.robertsspaceindustries\.com\/[^/]+\//.test(img)) {
+      img = img.replace(/\/[^/]+\.(jpg|jpeg|png|webp)(\?.*)?$/i, '/post.jpg')
+    }
+    return img
+  } catch {
+    return ''
+  }
+}
+
 /** Idempotent per-message. On the first sighting of an article we only set the baseline
  *  snapshot (no diff to show). From the 2nd update on we store a real diff row. */
 export async function processKbDiff(parsed: { msg_id: string; title: string; url: string }): Promise<void> {
