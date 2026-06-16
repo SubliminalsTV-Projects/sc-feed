@@ -5,8 +5,10 @@ import {
   DISCORD_TOKEN,
   RSI_TOKEN,
   fetchCommLinkImage,
+  fetchCommLinkBody,
   fetchRedditBody,
   fetchRedditDevComment,
+  fetchStoredMessageBody,
   fetchSpectrumThreadBodyByUrl,
   fetchTrackerDevContent,
   freshCutoff,
@@ -90,6 +92,10 @@ export async function GET(request: Request) {
             if (/\/comm-link\/transmission\//.test(parsed.url ?? '')) {
               const heroImg = await fetchCommLinkImage(parsed.url!)
               if (heroImg) parsed.image = heroImg
+              // Body is client-rendered: render once with a headless browser, then reuse the
+              // stored copy on later cycles (also avoids wiping it where the renderer is absent).
+              const stored = await fetchStoredMessageBody(parsed.msg_id)
+              parsed.body = stored || await fetchCommLinkBody(parsed.url!, parsed.title)
             }
             // Knowledge Base [Updated] cards link to Zendesk articles — generate a
             // change diff against our last snapshot (idempotent per msg_id). Best-effort:

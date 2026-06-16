@@ -1087,6 +1087,58 @@ export async function fetchCommLinkImage(url: string): Promise<string> {
   }
 }
 
+// Comm-Link article bodies are rendered client-side (the server returns an unfilled
+// template to plain HTTP fetches), so we render the page in a headless browser and read
+// the article text out of `.alexandria-content-body`. Playwright is a devDependency and
+// is listed in next.config `serverExternalPackages`, so it is NEVER bundled into the
+// Vercel build — the dynamic import simply throws there and we return ''. The local
+// Monitarr cron (which has chromium installed) is the only place this actually runs.
+export async function fetchCommLinkBody(url: string, titleHint = ''): Promise<string> {
+  let browser: import('playwright').Browser | undefined
+  try {
+    const { chromium } = await import('playwright')
+    browser = await chromium.launch({ headless: true })
+    const page = await browser.newPage({ userAgent: SPECTRUM_HEADERS['User-Agent'] })
+    // networkidle never settles (RSI holds persistent connections) — wait for the content node.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    // The content node ships in the template but is filled by JS afterwards — wait for it
+    // to actually carry text (not just exist), then a short settle for the rest to land.
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.alexandria-content-body')
+      return !!el && (el as HTMLElement).innerText.trim().length > 40
+    }, { timeout: 12000 }).catch(() => {})
+    await page.waitForTimeout(800)
+    const text: string = await page.evaluate(() => {
+      const el = document.querySelector('.alexandria-content-body')
+      return el ? (el as HTMLElement).innerText : ''
+    })
+    if (!text) return ''
+    // Drop leading lines that just echo the title (the article repeats its heading).
+    const titleLc = titleHint.toLowerCase().replace(/\s+/g, ' ').trim()
+    let lines = text.split('\n').map(l => l.trim())
+    while (lines.length && lines[0] && titleLc && titleLc.includes(lines[0].toLowerCase())) lines.shift()
+    while (lines.length && !lines[0]) lines.shift()
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000)
+  } catch {
+    return ''
+  } finally {
+    if (browser) await browser.close().catch(() => {})
+  }
+}
+
+/** Current stored body for a message (by unique msg_id), or '' if none. Lets the cron
+ *  reuse an already-rendered body instead of re-rendering, and avoids wiping it when the
+ *  renderer is unavailable. */
+export async function fetchStoredMessageBody(msgId: string): Promise<string> {
+  try {
+    const res = await fetch(`${PB_URL}/api/collections/sc_feed_messages/records?filter=msg_id%3D"${msgId}"&perPage=1`)
+    const j = await res.json()
+    return j?.items?.[0]?.body ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /** Idempotent per-message. On the first sighting of an article we only set the baseline
  *  snapshot (no diff to show). From the 2nd update on we store a real diff row. */
 export async function processKbDiff(parsed: { msg_id: string; title: string; url: string }): Promise<void> {
