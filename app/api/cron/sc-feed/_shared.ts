@@ -10,6 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import TurndownService from 'turndown'
+import { emojify } from 'node-emoji'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 export const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? ''
@@ -630,7 +631,16 @@ export async function upsertMessage(
   ).then(r => r.json()).catch(() => null)
 
   const record  = existing?.items?.[0]
-  const payload = { channel_id: channelId, channel_label: channelLabel, ...msg }
+  // Convert emoji shortcodes (e.g. :scroll:, :hourglass:) to real Unicode emoji.
+  // Central chokepoint so every source — Spectrum, Discord, Comm-Link — gets it.
+  // Idempotent: already-converted emoji and unknown :tokens: pass through unchanged.
+  const payload = {
+    channel_id: channelId,
+    channel_label: channelLabel,
+    ...msg,
+    title: emojify(msg.title ?? ''),
+    body:  msg.body ? emojify(msg.body) : msg.body,
+  }
 
   if (record) {
     await fetch(`${base}/${record.id}`, {
