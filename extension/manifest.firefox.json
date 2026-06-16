@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "SC Feed — RSI Token Sync",
+  "version": "0.1.0",
+  "description": "Pushes the RSI Rsi-Token session cookie to SC Feed so Spectrum/MOTD never go stale. Owner tool.",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": [
+    "https://robertsspaceindustries.com/*",
+    "https://*.robertsspaceindustries.com/*",
+    "https://sc-feed.subliminal.gg/*"
+  ],
+  "background": { "scripts": ["background.js"] },
+  "action": { "default_popup": "popup.html", "default_title": "SC Feed RSI Token Sync" },
+  "browser_specific_settings": {
+    "gecko": { "id": "rsi-token-sync@subliminal.gg", "strict_min_version": "115.0" }
+  }
+}
