@@ -18,6 +18,7 @@ export interface FeedMessage {
   discord_jump_url?: string
   tag?: string
   dev?: string
+  kbDiff?: { summary: string; added: number; removed: number }
 }
 
 export interface FeedChannel {
@@ -199,6 +200,25 @@ export async function GET() {
 
       return { id: ch.id, label: ch.label, file: ch.id, messages, updated_at: messages[0]?.ts_raw ?? recs[0]?.ts_raw ?? null, rsiStatus }
     })
+
+    // Enrich Knowledge Base cards (TrackerSC / cig-news, Zendesk article URLs) with their
+    // change-diff summary. One batched query; summaries only attach when there's a real diff.
+    const cig = channels.find(c => c.id === 'cig-news')
+    const kbIds = cig?.messages.filter(m => /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/.test(m.url)).map(m => m.id) ?? []
+    if (cig && kbIds.length) {
+      const filter = encodeURIComponent('(' + kbIds.map(id => `msg_id="${id}"`).join(' || ') + ')')
+      const diffs = await fetch(
+        `${PB_URL}/api/collections/sc_feed_kb_diffs/records?perPage=100&filter=${filter}`,
+        { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
+      ).then(r => r.ok ? r.json() : null).catch(() => null)
+      const byMsg = new Map<string, { summary: string; added: number; removed: number }>(
+        (diffs?.items ?? []).map((d: { msg_id: string; summary: string; added: number; removed: number }) => [d.msg_id, d])
+      )
+      for (const m of cig.messages) {
+        const d = byMsg.get(m.id)
+        if (d && (d.added > 0 || d.removed > 0)) m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed }
+      }
+    }
 
     return NextResponse.json(channels, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } })
   } catch (err) {

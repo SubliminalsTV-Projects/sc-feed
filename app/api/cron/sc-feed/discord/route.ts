@@ -9,8 +9,10 @@ import {
   fetchSpectrumThreadBodyByUrl,
   fetchTrackerDevContent,
   freshCutoff,
+  KB_ARTICLE_RE,
   mergePipelineContinuations,
   parseDiscordMessage,
+  processKbDiff,
   requireSecret,
   sendPushNotifications,
   upsertMessage,
@@ -80,6 +82,12 @@ export async function GET(request: Request) {
               const result = await fetchSpectrumThreadBodyByUrl(parsed.url)
               parsed.body  = result.body
               if (result.image && !parsed.image) parsed.image = result.image
+            }
+            // Knowledge Base [Updated] cards link to Zendesk articles — generate a
+            // change diff against our last snapshot (idempotent per msg_id). Best-effort:
+            // never let a KB fetch failure break the channel ingest.
+            if (parsed.url && KB_ARTICLE_RE.test(parsed.url)) {
+              await processKbDiff({ msg_id: parsed.msg_id, title: parsed.title, url: parsed.url }).catch(() => {})
             }
           } else {
             // Pipeline channels (sc-news / patch-news / sc-leaks): humans relay news

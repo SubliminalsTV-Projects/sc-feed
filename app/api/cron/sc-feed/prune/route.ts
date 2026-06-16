@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { pruneOldMessages, requireSecret } from '../_shared'
+import { pruneOldKbDiffs, pruneOldMessages, requireSecret } from '../_shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +9,8 @@ export async function GET(request: Request) {
 
   try {
     const count = await pruneOldMessages()
-    return NextResponse.json({ ok: true, deleted: count })
+    const kbDiffs = await pruneOldKbDiffs()
+    return NextResponse.json({ ok: true, deleted: count, kbDiffsDeleted: kbDiffs })
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }

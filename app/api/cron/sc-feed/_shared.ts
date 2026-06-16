@@ -775,3 +775,197 @@ export async function pruneOldMessages() {
   }
   return count
 }
+
+// ---------- knowledge base diffs (Zendesk help center) ----------
+// TrackerSC posts an [Updated] card whenever an RSI Knowledge Base article changes,
+// but never says WHAT changed. We re-fetch the article from Zendesk's public Help
+// Center API, normalize it to stable text, diff it against the last snapshot we
+// stored, and persist a per-message diff so the card can show the actual change.
+//
+// Storage (latest-only): sc_feed_kb_snapshots holds ONE rolling normalized body per
+// article_id (the baseline for the NEXT edit). sc_feed_kb_diffs holds the frozen diff
+// keyed by msg_id (one row per [Updated] card). Snapshots must be exempt from prune.
+
+// Captures locale (group 1) + numeric article id (group 2)
+export const KB_ARTICLE_RE = /support\.robertsspaceindustries\.com\/hc\/([^/]+)\/articles\/(\d+)/
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…',
+}
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&([a-zA-Z]+);/g, (m, name) => HTML_ENTITIES[name] ?? m)
+}
+
+/** Strip Zendesk article HTML to stable plaintext so markup churn (auto-generated
+ *  heading ids, wysiwyg-* classes, attribute reordering) never shows up as a change. */
+export function normalizeKbHtml(html: string): string {
+  let t = html
+  t = t.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+  t = t.replace(/<\/(p|div|li|h[1-6]|tr|section|article|header|footer|ul|ol|blockquote|figure|figcaption|table)>/gi, '\n')
+  t = t.replace(/<br\s*\/?>/gi, '\n')
+  t = t.replace(/<li[^>]*>/gi, '• ')
+  t = t.replace(/<[^>]+>/g, '')
+  t = decodeEntities(t)
+  t = t.replace(/\r/g, '')
+  t = t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).join('\n')
+  t = t.replace(/\n{3,}/g, '\n\n').trim()
+  return t
+}
+
+function tokenizeKb(text: string): string[] {
+  const out: string[] = []
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    for (const w of lines[i].split(/\s+/)) if (w) out.push(w)
+    if (i < lines.length - 1) out.push('\n')
+  }
+  return out
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+const INS_STYLE = 'background-color:rgb(34 197 94 / 0.20);text-decoration:none;border-radius:3px;padding:0 2px'
+const DEL_STYLE = 'background-color:rgb(239 68 68 / 0.18);text-decoration:line-through;border-radius:3px;padding:0 2px'
+
+function renderRun(tag: 'ins' | 'del' | null, toks: string[]): string {
+  const html = toks.map(t => (t === '\n' ? '<br>' : esc(t))).join(' ').replace(/ <br> /g, '<br>')
+  if (!tag) return html
+  const style = tag === 'ins' ? INS_STYLE : DEL_STYLE
+  return `<${tag} style="${style}">${html}</${tag}>`
+}
+
+/** Word-level LCS diff of two normalized texts → rendered HTML + add/remove word counts.
+ *  Falls back to a coarse whole-block replace if the token product is too large to DP. */
+export function wordDiff(oldText: string, newText: string): { html: string; added: number; removed: number } {
+  const a = tokenizeKb(oldText)
+  const b = tokenizeKb(newText)
+  const countWords = (toks: string[]) => toks.filter(t => t !== '\n').length
+
+  if (a.length * b.length > 6_000_000) {
+    return {
+      html: renderRun('del', a) + '<br><br>' + renderRun('ins', b),
+      added: countWords(b), removed: countWords(a),
+    }
+  }
+
+  const n = a.length, m = b.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+
+  type Op = { t: 'eq' | 'add' | 'del'; tok: string }
+  const ops: Op[] = []
+  let i = 0, j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { ops.push({ t: 'eq', tok: a[i] }); i++; j++ }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: 'del', tok: a[i] }); i++ }
+    else { ops.push({ t: 'add', tok: b[j] }); j++ }
+  }
+  while (i < n) ops.push({ t: 'del', tok: a[i++] })
+  while (j < m) ops.push({ t: 'add', tok: b[j++] })
+
+  let added = 0, removed = 0
+  const parts: string[] = []
+  let run: Op[] = []
+  const flush = () => {
+    if (!run.length) return
+    const tag = run[0].t === 'eq' ? null : run[0].t === 'add' ? 'ins' : 'del'
+    parts.push(renderRun(tag, run.map(o => o.tok)))
+    if (tag === 'ins') added += countWords(run.map(o => o.tok))
+    if (tag === 'del') removed += countWords(run.map(o => o.tok))
+    run = []
+  }
+  for (const op of ops) {
+    if (run.length && run[0].t !== op.t) flush()
+    run.push(op)
+  }
+  flush()
+  return { html: parts.join(' ').replace(/ <br> /g, '<br>'), added, removed }
+}
+
+async function fetchZendeskArticle(id: string, locale: string): Promise<{ body: string; title: string; edited_at: string } | null> {
+  try {
+    const res = await fetch(
+      `https://support.robertsspaceindustries.com/api/v2/help_center/${locale}/articles/${id}.json`,
+      { headers: { 'Accept': 'application/json', 'User-Agent': SPECTRUM_HEADERS['User-Agent'] } }
+    )
+    if (!res.ok) return null
+    const j = await res.json()
+    const a = j.article
+    if (!a) return null
+    return { body: a.body ?? '', title: a.title ?? '', edited_at: a.edited_at ?? a.updated_at ?? '' }
+  } catch { return null }
+}
+
+/** Idempotent per-message. On the first sighting of an article we only set the baseline
+ *  snapshot (no diff to show). From the 2nd update on we store a real diff row. */
+export async function processKbDiff(parsed: { msg_id: string; title: string; url: string }): Promise<void> {
+  const match = parsed.url.match(KB_ARTICLE_RE)
+  if (!match) return
+  const [, locale, articleId] = match
+  const base    = `${PB_URL}/api/collections`
+  const headers = { 'Content-Type': 'application/json' }
+
+  // Idempotency: if we've already produced a diff row for this card, stop.
+  const seen = await fetch(`${base}/sc_feed_kb_diffs/records?filter=msg_id%3D"${parsed.msg_id}"&perPage=1`, { headers })
+    .then(r => r.json()).catch(() => null)
+  if (seen?.items?.[0]) return
+
+  const art = await fetchZendeskArticle(articleId, locale)
+  if (!art) return
+  const current = normalizeKbHtml(art.body)
+
+  const snapRes = await fetch(`${base}/sc_feed_kb_snapshots/records?filter=article_id%3D"${articleId}"&perPage=1`, { headers })
+    .then(r => r.json()).catch(() => null)
+  const snap = snapRes?.items?.[0]
+
+  let added = 0, removed = 0, html = '', summary = ''
+  if (snap?.body_normalized && snap.body_normalized !== current) {
+    const d = wordDiff(snap.body_normalized, current)
+    added = d.added; removed = d.removed; html = d.html
+    summary = `+${added} / −${removed}`
+  }
+
+  // Always write the diff row (even baseline/no-change) so re-runs short-circuit above.
+  await fetch(`${base}/sc_feed_kb_diffs/records`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      msg_id: parsed.msg_id, article_id: articleId, summary, added, removed,
+      diff_html: html, title: art.title || parsed.title, url: parsed.url,
+    }),
+  }).catch(() => {})
+
+  // Roll the snapshot forward to the current body for the next edit.
+  const snapBody = JSON.stringify({
+    article_id: articleId, body_normalized: current,
+    edited_at: art.edited_at, title: art.title, url: parsed.url,
+  })
+  if (snap) {
+    await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => {})
+  } else {
+    await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => {})
+  }
+}
+
+/** Prune KB diff rows older than 15 days (they're orphaned once their message is pruned).
+ *  Snapshots are NEVER pruned — they're the baseline for diffing future edits. */
+export async function pruneOldKbDiffs(): Promise<number> {
+  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
+  const res = await fetch(
+    `${PB_URL}/api/collections/sc_feed_kb_diffs/records?filter=${encodeURIComponent(`created<"${cutoff}"`)}&perPage=200`,
+    { headers: { 'Content-Type': 'application/json' } }
+  ).then(r => r.json()).catch(() => null)
+
+  let count = 0
+  for (const rec of res?.items ?? []) {
+    await fetch(`${PB_URL}/api/collections/sc_feed_kb_diffs/records/${rec.id}`, { method: 'DELETE' }).catch(() => {})
+    count++
+  }
+  return count
+}

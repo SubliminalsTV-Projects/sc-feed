@@ -266,3 +266,11 @@ html, body {
 
 .scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-hidden::-webkit-scrollbar { display: none; }
+
+/* Knowledge Base "What Changed" diff highlighting (rendered HTML from the cron).
+ * Default = dark; .light on <html> swaps to darker text for contrast on light bg. */
+.kb-diff { white-space: pre-wrap; }
+.kb-diff ins { background-color: rgb(34 197 94 / 0.20); color: rgb(134 239 172); text-decoration: none; border-radius: 3px; padding: 0 2px; }
+.kb-diff del { background-color: rgb(239 68 68 / 0.18); color: rgb(252 165 165); border-radius: 3px; padding: 0 2px; }
+html.light .kb-diff ins { color: rgb(21 128 61); }
+html.light .kb-diff del { color: rgb(185 28 28); }
