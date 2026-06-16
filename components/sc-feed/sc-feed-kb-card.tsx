@@ -33,6 +33,13 @@ export function KbCard({ msg, channelId, isRead, onMarkRead }: {
 
   const openDiff = () => { setDiffOpen(true); onMarkRead?.() }
   const openReader = () => { setReaderOpen(true); onMarkRead?.() }
+  // Whole-card click opens the reader (matches every other card). Inner buttons —
+  // the diff preview, "View full diff", the expand chevron — are skipped here and
+  // handle their own clicks.
+  const handleCardClick = (e: React.MouseEvent<HTMLElement>) => {
+    if ((e.target as HTMLElement).closest('a, button')) return
+    openReader()
+  }
 
   // Match the shared card's expand affordance: clamp the excerpt, show a chevron
   // only when there's more article to reveal.
@@ -47,7 +54,7 @@ export function KbCard({ msg, channelId, isRead, onMarkRead }: {
   }, [expanded, diff?.excerpt])
 
   return (
-    <article className={`rounded-xl bg-surface-container-low border border-outline-variant/40 overflow-hidden hover:border-outline-variant/70 transition-all ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}>
+    <article onClick={handleCardClick} className={`group cursor-pointer rounded-xl bg-surface-container-low border border-outline-variant/40 overflow-hidden hover:border-outline-variant/70 transition-all ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}>
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2 mb-1.5">
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-label font-black uppercase tracking-widest border-violet-500/40 bg-violet-500/10 text-violet-400">
