@@ -18,7 +18,7 @@ export interface FeedMessage {
   discord_jump_url?: string
   tag?: string
   dev?: string
-  kbDiff?: { summary: string; added: number; removed: number; preview?: string }
+  kbDiff?: { summary: string; added: number; removed: number; preview?: string; excerpt?: string }
 }
 
 export interface FeedChannel {
@@ -32,6 +32,18 @@ export interface FeedChannel {
     summaryStatus: string
     systems: Array<{ name: string; status: string }>
   }
+}
+
+// Build a short preview from a Knowledge Base article's normalized body (already
+// newline-delimited plaintext from the snapshot). Drops a leading line that just
+// repeats the title, then trims to a sentence-ish length so the card stays compact.
+function kbExcerpt(bodyNormalized: string, title: string): string {
+  let lines = bodyNormalized.split('\n').map(l => l.trim()).filter(Boolean)
+  const t = title.replace(/^\[Updated\]\s*/i, '').trim().toLowerCase()
+  if (lines[0]?.toLowerCase() === t) lines = lines.slice(1)
+  let text = lines.join(' ').replace(/\s+/g, ' ').trim()
+  if (text.length > 260) text = text.slice(0, 260).replace(/\s+\S*$/, '') + '…'
+  return text
 }
 
 // Discord channels — channel_id is the real Discord channel snowflake stored in PB
@@ -201,22 +213,46 @@ export async function GET() {
       return { id: ch.id, label: ch.label, file: ch.id, messages, updated_at: messages[0]?.ts_raw ?? recs[0]?.ts_raw ?? null, rsiStatus }
     })
 
-    // Enrich Knowledge Base cards (TrackerSC / cig-news, Zendesk article URLs) with their
-    // change-diff summary. One batched query; summaries only attach when there's a real diff.
+    // Enrich Knowledge Base cards (TrackerSC / cig-news, Zendesk article URLs). When the
+    // article changed, attach the change-diff summary. When it didn't (baseline/unchanged
+    // sighting), attach an excerpt of the article body so the card isn't a bare title —
+    // pulled from the rolling snapshot (never pruned), keyed by the diff row's article_id.
     const cig = channels.find(c => c.id === 'cig-news')
-    const kbIds = cig?.messages.filter(m => /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/.test(m.url)).map(m => m.id) ?? []
-    if (cig && kbIds.length) {
-      const filter = encodeURIComponent('(' + kbIds.map(id => `msg_id="${id}"`).join(' || ') + ')')
+    const kbMsgs = cig?.messages.filter(m => /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/.test(m.url)) ?? []
+    if (cig && kbMsgs.length) {
+      type DiffRow = { msg_id: string; article_id?: string; summary: string; added: number; removed: number; preview_html?: string }
+      const filter = encodeURIComponent('(' + kbMsgs.map(m => `msg_id="${m.id}"`).join(' || ') + ')')
       const diffs = await fetch(
         `${PB_URL}/api/collections/sc_feed_kb_diffs/records?perPage=100&filter=${filter}`,
         { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
       ).then(r => r.ok ? r.json() : null).catch(() => null)
-      const byMsg = new Map<string, { summary: string; added: number; removed: number; preview_html?: string }>(
-        (diffs?.items ?? []).map((d: { msg_id: string; summary: string; added: number; removed: number; preview_html?: string }) => [d.msg_id, d])
-      )
-      for (const m of cig.messages) {
+      const byMsg = new Map<string, DiffRow>((diffs?.items ?? []).map((d: DiffRow) => [d.msg_id, d]))
+
+      // Batch-fetch snapshots for cards that have no real diff (need an excerpt instead).
+      const artIds = [...new Set(
+        kbMsgs.map(m => byMsg.get(m.id)).filter((d): d is DiffRow => !!d && d.added === 0 && d.removed === 0)
+          .map(d => d.article_id).filter((a): a is string => !!a)
+      )]
+      const bodyByArticle = new Map<string, string>()
+      if (artIds.length) {
+        const sf = encodeURIComponent('(' + artIds.map(a => `article_id="${a}"`).join(' || ') + ')')
+        const snaps = await fetch(
+          `${PB_URL}/api/collections/sc_feed_kb_snapshots/records?perPage=100&filter=${sf}`,
+          { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
+        ).then(r => r.ok ? r.json() : null).catch(() => null)
+        for (const s of (snaps?.items ?? []) as { article_id: string; body_normalized?: string }[]) {
+          if (s.body_normalized) bodyByArticle.set(s.article_id, s.body_normalized)
+        }
+      }
+
+      for (const m of kbMsgs) {
         const d = byMsg.get(m.id)
-        if (d && (d.added > 0 || d.removed > 0)) m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed, preview: d.preview_html }
+        if (d && (d.added > 0 || d.removed > 0)) {
+          m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed, preview: d.preview_html }
+        } else {
+          const excerpt = d?.article_id ? kbExcerpt(bodyByArticle.get(d.article_id) ?? '', m.title) : ''
+          if (excerpt) m.kbDiff = { summary: '', added: 0, removed: 0, excerpt }
+        }
       }
     }
 

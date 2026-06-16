@@ -23,6 +23,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
 }) {
   const [diffOpen, setDiffOpen] = useState(false)
   const diff = msg.kbDiff
+  const hasChange = !!diff && (diff.added > 0 || diff.removed > 0)
   const title = msg.title.replace(/^\[Updated\]\s*/i, '').trim()
 
   const openDiff = () => { setDiffOpen(true); onMarkRead?.() }
@@ -52,7 +53,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
           </h3>
         </a>
 
-        {diff?.preview && (
+        {hasChange && diff?.preview && (
           <button
             onClick={openDiff}
             className="mt-2 block w-full text-left rounded-lg border border-violet-500/25 bg-violet-500/[0.06] hover:bg-violet-500/[0.1] hover:border-violet-500/40 transition-colors px-2.5 py-2 cursor-pointer"
@@ -63,9 +64,15 @@ export function KbCard({ msg, isRead, onMarkRead }: {
             />
           </button>
         )}
+
+        {!hasChange && diff?.excerpt && (
+          <p className="mt-1.5 text-[12px] font-body leading-relaxed text-on-surface-variant/70 line-clamp-3">
+            {diff.excerpt}
+          </p>
+        )}
       </div>
 
-      {diff && (diff.added > 0 || diff.removed > 0) && (
+      {hasChange && (
         <button
           onClick={openDiff}
           className="w-full flex items-center justify-between gap-2 px-3 py-2 border-t border-outline-variant/20 bg-surface-container/30 hover:bg-surface-container/60 transition-colors cursor-pointer"
