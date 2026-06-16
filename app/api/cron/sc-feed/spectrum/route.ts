@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
+import { loadRsiToken } from '@/lib/rsi-token'
 import {
-  RSI_TOKEN,
   SPECTRUM_FORUMS,
   SPECTRUM_MOTDS,
   fetchSpectrumForumThreads,
@@ -18,7 +18,8 @@ export async function GET(request: Request) {
   const unauth = requireSecret(request)
   if (unauth) return unauth
 
-  if (!RSI_TOKEN) {
+  // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum/MOTD.
+  if (!(await loadRsiToken())) {
     return NextResponse.json({ error: 'RSI_TOKEN not set' }, { status: 500 })
   }
 

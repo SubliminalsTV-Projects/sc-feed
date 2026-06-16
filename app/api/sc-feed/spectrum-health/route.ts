@@ -1,19 +1,19 @@
 import { NextResponse } from 'next/server'
+import { loadRsiToken } from '@/lib/rsi-token'
 import { SPECTRUM_MOTDS, SPECTRUM_HEADERS } from '../../cron/sc-feed/_shared'
 
 export const dynamic = 'force-dynamic'
 
-const RSI_TOKEN = process.env.RSI_TOKEN ?? ''
-
-const authHeaders = {
+type AuthHeaders = Record<string, string>
+const buildHeaders = (token: string): AuthHeaders => ({
   ...SPECTRUM_HEADERS,
-  'X-Rsi-Token': RSI_TOKEN,
-  'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
-}
+  'X-Rsi-Token': token,
+  'Cookie':      `Rsi-Token=${token}`,
+})
 
 // Probe the public forum endpoint — proves the token is a valid session.
 // Works even for a non-Evocati account, so a pass here does NOT prove MOTD access.
-async function checkForum(signal: AbortSignal): Promise<{ ok: boolean; reason?: string }> {
+async function checkForum(authHeaders: AuthHeaders, signal: AbortSignal): Promise<{ ok: boolean; reason?: string }> {
   const res = await fetch('https://robertsspaceindustries.com/api/spectrum/forum/channel/threads', {
     method: 'POST',
     signal,
@@ -29,7 +29,7 @@ async function checkForum(signal: AbortSignal): Promise<{ ok: boolean; reason?: 
 // Probe getMotd for a gated lobby. This is the Evocati-gated call the forum check can't see.
 // success:1            → accessible (message may be empty if no MOTD is currently set)
 // success:0 / Err...   → account lacks access to this lobby (e.g. Evocati wave closed)
-async function checkMotd(lobbyId: string, signal: AbortSignal): Promise<{ ok: boolean; code: string }> {
+async function checkMotd(authHeaders: AuthHeaders, lobbyId: string, signal: AbortSignal): Promise<{ ok: boolean; code: string }> {
   const res = await fetch('https://robertsspaceindustries.com/api/spectrum/lobby/getMotd', {
     method: 'POST',
     signal,
@@ -43,19 +43,22 @@ async function checkMotd(lobbyId: string, signal: AbortSignal): Promise<{ ok: bo
 }
 
 export async function GET() {
-  if (!RSI_TOKEN) {
+  // Validate the same token the cron uses: PocketBase (extension-pushed) first, env fallback.
+  const token = await loadRsiToken()
+  if (!token) {
     return NextResponse.json({ valid: false, reason: 'RSI_TOKEN not configured', forum: false, motd: {} })
   }
+  const authHeaders = buildHeaders(token)
 
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
 
   try {
-    const forum = await checkForum(ctrl.signal)
+    const forum = await checkForum(authHeaders, ctrl.signal)
 
     // Probe every configured MOTD lobby so a lapsed-Evocati token can't pass silently.
     const motdResults = await Promise.all(
-      SPECTRUM_MOTDS.map(async (m) => [m.channelId, await checkMotd(m.lobbyId, ctrl.signal)] as const),
+      SPECTRUM_MOTDS.map(async (m) => [m.channelId, await checkMotd(authHeaders, m.lobbyId, ctrl.signal)] as const),
     )
     const motd = Object.fromEntries(motdResults.map(([id, r]) => [id, r.code]))
     const motdFailed = motdResults.filter(([, r]) => !r.ok)

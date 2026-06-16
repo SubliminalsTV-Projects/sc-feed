@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
+import { loadRsiToken } from '@/lib/rsi-token'
 import {
   DISCORD_BASE,
   DISCORD_CHANNELS,
   DISCORD_TOKEN,
-  RSI_TOKEN,
   fetchCommLinkImage,
   fetchCommLinkBody,
   fetchRedditBody,
@@ -32,6 +32,10 @@ export async function GET(request: Request) {
   if (!DISCORD_TOKEN) {
     return NextResponse.json({ error: 'DISCORD_BOT_TOKEN not set' }, { status: 500 })
   }
+
+  // Resolve the RSI token (PocketBase, extension-pushed → env fallback) once per run, before
+  // any Spectrum/dev-tracker enrichment reads it.
+  const rsiToken = await loadRsiToken()
 
   const results: Record<string, unknown> = {}
   const newMsgs: NewMsg[] = []
@@ -72,7 +76,7 @@ export async function GET(request: Request) {
             } else if (!parsed.body && parsed.url?.includes('reddit.com/r/')) {
               parsed.body = await fetchRedditBody(parsed.url)
             }
-            if (RSI_TOKEN && /robertsspaceindustries\.com\/spectrum\/.*\/thread\/[^/]+\/\d+$/.test(parsed.url ?? '')) {
+            if (rsiToken && /robertsspaceindustries\.com\/spectrum\/.*\/thread\/[^/]+\/\d+$/.test(parsed.url ?? '')) {
               const devName = (parsed.body ?? '').replace(/\s*\[Reply\]\s*$/, '').trim()
               const result = await fetchTrackerDevContent(parsed.url!, devName)
               parsed.body = result.body || ''
@@ -81,7 +85,7 @@ export async function GET(request: Request) {
               // (tavern/opengraph.png) — always replace with the actual thread image,
               // even if that means clearing it when the thread has none.
               parsed.image = result.image
-            } else if (!parsed.body && RSI_TOKEN && parsed.url?.includes('robertsspaceindustries.com/spectrum/community/')) {
+            } else if (!parsed.body && rsiToken && parsed.url?.includes('robertsspaceindustries.com/spectrum/community/')) {
               const result = await fetchSpectrumThreadBodyByUrl(parsed.url)
               parsed.body  = result.body
               if (result.image && !parsed.image) parsed.image = result.image
@@ -111,7 +115,7 @@ export async function GET(request: Request) {
             // route reads source||... as a "dev" pill.
             if (!parsed.body && parsed.url?.includes('reddit.com/r/')) {
               parsed.body = await fetchRedditBody(parsed.url)
-            } else if (!parsed.body && RSI_TOKEN && parsed.url?.includes('robertsspaceindustries.com/spectrum/community/')) {
+            } else if (!parsed.body && rsiToken && parsed.url?.includes('robertsspaceindustries.com/spectrum/community/')) {
               const result = await fetchSpectrumThreadBodyByUrl(parsed.url)
               parsed.body  = result.body
               if (result.image && !parsed.image) parsed.image = result.image

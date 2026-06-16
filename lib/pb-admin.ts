@@ -1,5 +1,3 @@
-import 'server-only'
-
 // Server-only PocketBase superuser client. Used ONLY for the locked `sc_feed_config`
 // collection (admin-only rules) — the public feed still reads the open collections through
 // the unauthenticated /api/pb proxy. The admin token never reaches the browser.

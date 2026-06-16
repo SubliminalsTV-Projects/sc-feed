@@ -11,11 +11,11 @@
 import { NextResponse } from 'next/server'
 import TurndownService from 'turndown'
 import { emojify } from 'node-emoji'
+import { rsiTokenValue } from '@/lib/rsi-token'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 export const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? ''
 export const DISCORD_BASE  = 'https://discord.com/api/v10'
-export const RSI_TOKEN     = process.env.RSI_TOKEN ?? ''
 
 export const DISCORD_CHANNELS = [
   { id: '1484315008216207450', label: 'SC News',           file_id: 'sc-news'    },
@@ -247,8 +247,8 @@ export async function fetchSpectrumThreadBody(threadId: string, slug?: string): 
       method: 'POST',
       headers: {
         ...SPECTRUM_HEADERS,
-        'X-Rsi-Token': RSI_TOKEN,
-        'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+        'X-Rsi-Token': rsiTokenValue(),
+        'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
       },
       body: JSON.stringify({ thread_id: threadId, ...(slug ? { slug } : {}), page: 1, sort: 'oldest' }),
     })
@@ -274,15 +274,15 @@ export async function fetchSpectrumThreadBody(threadId: string, slug?: string): 
 
 export async function fetchSpectrumThreadBodyByUrl(url: string): Promise<{ body: string; image: string; opMember: string }> {
   const match = url.match(/\/spectrum\/community\/[^/]+\/forum\/(\d+)\/thread\/([^/?#]+)/)
-  if (!match || !RSI_TOKEN) return { body: '', image: '', opMember: '' }
+  if (!match || !rsiTokenValue()) return { body: '', image: '', opMember: '' }
   const [, forumId, slug] = match
   try {
     const res = await fetch('https://robertsspaceindustries.com/api/spectrum/forum/channel/threads', {
       method: 'POST',
       headers: {
         ...SPECTRUM_HEADERS,
-        'X-Rsi-Token': RSI_TOKEN,
-        'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+        'X-Rsi-Token': rsiTokenValue(),
+        'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
       },
       body: JSON.stringify({ channel_id: forumId, sort: 'newest', page: 1 }),
     })
@@ -463,8 +463,8 @@ async function fetchThreadTree(slug: string, replyId: string, sort: 'newest' | '
     method: 'POST',
     headers: {
       ...SPECTRUM_HEADERS,
-      'X-Rsi-Token': RSI_TOKEN,
-      'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+      'X-Rsi-Token': rsiTokenValue(),
+      'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
     },
     body: JSON.stringify({ thread_id: replyId, slug, page: 1, sort }),
   })
@@ -487,7 +487,7 @@ async function fetchThreadTree(slug: string, replyId: string, sort: 'newest' | '
 //      the TrackerSC bot stub at the call site.
 export async function fetchTrackerDevContent(url: string, devName = ''): Promise<{ body: string; image: string }> {
   const match = url.match(/\/spectrum\/community\/[^/]+\/forum\/\d+\/thread\/([^/]+)\/(\d+)/)
-  if (!match || !RSI_TOKEN) return { body: '', image: '' }
+  if (!match || !rsiTokenValue()) return { body: '', image: '' }
   const [, slug, replyId] = match
   try {
     const trees: Array<SpectrumReply & { content_reply_id?: string | number }> = []
@@ -534,8 +534,8 @@ export async function fetchSpectrumForumThreads(forumId: string, label: string, 
     method: 'POST',
     headers: {
       ...SPECTRUM_HEADERS,
-      'X-Rsi-Token': RSI_TOKEN,
-      'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+      'X-Rsi-Token': rsiTokenValue(),
+      'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
     },
     body: JSON.stringify({ channel_id: forumId, sort: 'newest', page: 1 }),
   })
@@ -580,8 +580,8 @@ export async function fetchSpectrumMotd(lobbyId: string, label: string) {
     method: 'POST',
     headers: {
       ...SPECTRUM_HEADERS,
-      'X-Rsi-Token': RSI_TOKEN,
-      'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+      'X-Rsi-Token': rsiTokenValue(),
+      'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
     },
     body: JSON.stringify({ lobby_id: lobbyId }),
   })

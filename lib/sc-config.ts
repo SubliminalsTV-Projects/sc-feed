@@ -1,4 +1,3 @@
-import 'server-only'
 import { pbAdminFetch } from './pb-admin'
 
 // Accessor for the locked `sc_feed_config` singleton store (admin-only PB collection, one
