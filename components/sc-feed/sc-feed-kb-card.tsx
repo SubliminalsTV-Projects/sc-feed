@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, BookOpen, ChevronDown, ChevronUp, FileDiff } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { KbDiffModal } from './sc-feed-kb-diff-modal'
-import { MessageModal } from './sc-feed-message-modal'
 import { timeAgo } from './sc-feed-utils'
 
 /**
@@ -14,16 +13,15 @@ import { timeAgo } from './sc-feed-utils'
  * first-class element here: an inline preview of the change + a "View full diff" action,
  * never a truncatable footer pill.
  */
-export function KbCard({ msg, channelId, isRead, onMarkRead }: {
+export function KbCard({ msg, isRead, onMarkRead }: {
   msg: FeedMessage
-  channelId: string
+  channelId?: string
   blurred?: boolean
   lastSeen?: string | null
   isRead?: boolean
   onMarkRead?: () => void
 }) {
   const [diffOpen, setDiffOpen] = useState(false)
-  const [readerOpen, setReaderOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -31,14 +29,17 @@ export function KbCard({ msg, channelId, isRead, onMarkRead }: {
   const hasChange = !!diff && (diff.added > 0 || diff.removed > 0)
   const title = msg.title.replace(/^\[Updated\]\s*/i, '').trim()
 
+  // KB cards never open the shared MessageModal — that renders the bare Zendesk/RSI logo
+  // plus the junk og:description body. The KB reader (KbDiffModal) is the single reader for
+  // every KB interaction: a changed article shows its diff, an unchanged one shows the
+  // article excerpt. So all entry points (whole card, title, diff preview, footer) open it.
   const openDiff = () => { setDiffOpen(true); onMarkRead?.() }
-  const openReader = () => { setReaderOpen(true); onMarkRead?.() }
   // Whole-card click opens the reader (matches every other card). Inner buttons —
   // the diff preview, "View full diff", the expand chevron — are skipped here and
   // handle their own clicks.
   const handleCardClick = (e: React.MouseEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest('a, button')) return
-    openReader()
+    openDiff()
   }
 
   // Match the shared card's expand affordance: clamp the excerpt, show a chevron
@@ -65,7 +66,7 @@ export function KbCard({ msg, channelId, isRead, onMarkRead }: {
           </span>
         </div>
 
-        <button onClick={openReader} className="group block w-full text-left cursor-pointer">
+        <button onClick={openDiff} className="group block w-full text-left cursor-pointer">
           <h3 className="text-[13px] font-headline font-black text-on-surface leading-snug group-hover:text-primary-container transition-colors">
             {title}
             <ArrowUpRight className="inline w-3 h-3 ml-0.5 align-text-top text-on-surface-variant/40 group-hover:text-primary-container" />
@@ -119,8 +120,16 @@ export function KbCard({ msg, channelId, isRead, onMarkRead }: {
         </button>
       )}
 
-      {diffOpen && <KbDiffModal msgId={msg.id} title={title} onClose={() => setDiffOpen(false)} />}
-      {readerOpen && <MessageModal msg={msg} channelId={channelId} onClose={() => setReaderOpen(false)} />}
+      {diffOpen && (
+        <KbDiffModal
+          msgId={msg.id}
+          title={title}
+          url={msg.url}
+          excerpt={diff?.excerpt}
+          hasChange={hasChange}
+          onClose={() => setDiffOpen(false)}
+        />
+      )}
     </article>
   )
 }
