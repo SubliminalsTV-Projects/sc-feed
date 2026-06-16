@@ -9,6 +9,7 @@
 // silently breaks one feed when the other's logic is touched. See discord/route.ts.
 
 import { NextResponse } from 'next/server'
+import TurndownService from 'turndown'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 export const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? ''
@@ -1108,17 +1109,26 @@ export async function fetchCommLinkBody(url: string, titleHint = ''): Promise<st
       return !!el && (el as HTMLElement).innerText.trim().length > 40
     }, { timeout: 12000 }).catch(() => {})
     await page.waitForTimeout(800)
-    const text: string = await page.evaluate(() => {
+    // Pull the article HTML (not innerText) so structure — headings, lists, bold, links —
+    // survives. We convert it to Markdown below; the cards already render Markdown.
+    const html: string = await page.evaluate(() => {
       const el = document.querySelector('.alexandria-content-body')
-      return el ? (el as HTMLElement).innerText : ''
+      return el ? el.innerHTML : ''
     })
-    if (!text) return ''
-    // Drop leading lines that just echo the title (the article repeats its heading).
+    if (!html) return ''
+
+    const turndown = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', emDelimiter: '*' })
+    turndown.remove('img')        // hero image is shown separately; keep the body text-focused
+    turndown.remove('figure')
+    let md = turndown.turndown(html)
+
+    // Drop leading heading/paragraph lines that just echo the card title.
     const titleLc = titleHint.toLowerCase().replace(/\s+/g, ' ').trim()
-    let lines = text.split('\n').map(l => l.trim())
-    while (lines.length && lines[0] && titleLc && titleLc.includes(lines[0].toLowerCase())) lines.shift()
-    while (lines.length && !lines[0]) lines.shift()
-    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000)
+    let lines = md.split('\n')
+    const bare = (l: string) => l.replace(/^#+\s*/, '').replace(/[*_>`]/g, '').trim().toLowerCase()
+    while (lines.length && (!lines[0].trim() || (titleLc && bare(lines[0]) && titleLc.includes(bare(lines[0]))))) lines.shift()
+    md = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+    return md.slice(0, 4000)
   } catch {
     return ''
   } finally {
