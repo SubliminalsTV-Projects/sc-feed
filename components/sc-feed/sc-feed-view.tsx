@@ -18,7 +18,9 @@ function urlBase64ToUint8Array(b64: string): Uint8Array<ArrayBuffer> {
 }
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Loader2, Menu, RefreshCw, Search, Settings, Sparkles, X } from 'lucide-react'
+import Link from 'next/link'
+import { useSession, signOut } from 'next-auth/react'
+import { Download, Loader2, LogIn, LogOut, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
 import {
   COLUMN_WIDTHS, DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext,
@@ -112,6 +114,7 @@ export function ScFeedView() {
   const [patchNotesOpen, setPatchNotesOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const mobileMenuRef = useRef<HTMLDivElement | null>(null)
+  const { data: session, status: authStatus } = useSession()
   const [leaksRevealed, setLeaksRevealed] = useState(false)
   const [mobileActiveFeed, setMobileActiveFeed] = useState<string | null>(null)
 
@@ -675,6 +678,32 @@ export function ScFeedView() {
     })
   }, [columnOrder, columnWidths, columnHeights, hiddenChannels])
 
+  // Export the CURRENT live layout as portable JSON (the four LayoutPreset fields). Used to
+  // hand a tuned layout off — e.g. to bake into DEFAULT_PRESETS as the shipped default.
+  const exportLayout = useCallback(() => JSON.stringify({
+    columnOrder: columnOrder ?? [],
+    columnWidths,
+    columnHeights,
+    hiddenChannels: [...hiddenChannels],
+  }, null, 2), [columnOrder, columnWidths, columnHeights, hiddenChannels])
+
+  // Apply a pasted layout JSON. Returns false on malformed input so the UI can flag it.
+  const importLayout = useCallback((text: string): boolean => {
+    try {
+      const p = JSON.parse(text)
+      if (!Array.isArray(p.columnOrder)) return false
+      applyLayoutPreset({
+        id: 'imported',
+        name: 'Imported',
+        columnOrder: p.columnOrder,
+        columnWidths: (p.columnWidths ?? {}) as Record<string, ColumnWidth>,
+        columnHeights: (p.columnHeights ?? {}) as Record<string, ColumnHeight>,
+        hiddenChannels: Array.isArray(p.hiddenChannels) ? p.hiddenChannels : [],
+      })
+      return true
+    } catch { return false }
+  }, [applyLayoutPreset])
+
   const fanOutUserFeeds = useCallback(async (channels: FeedChannel[]): Promise<FeedChannel[]> => {
     const yt = userYTRef.current
     const tw = userTwitchRef.current
@@ -1056,6 +1085,8 @@ export function ScFeedView() {
     onApplyPreset: applyLayoutPreset,
     onDeletePreset: deleteLayoutPreset,
     onOverwritePreset: overwriteLayoutPreset,
+    onExportLayout: exportLayout,
+    onImportLayout: importLayout,
     pushSupported, pushEnabled, pushPermission, pushPending, pushError,
     pushTestPending, pushTestStatus,
     onTogglePush: handleTogglePush,
@@ -1130,6 +1161,40 @@ export function ScFeedView() {
               >
                 <Sparkles className="w-3.5 h-3.5 text-primary-container" />What&apos;s New
               </button>
+
+              {/* Account — sign in / signed-in identity + sign out (+ owner backend) */}
+              {authStatus !== 'loading' && (
+                session ? (
+                  <>
+                    <div className="px-3 pt-2.5 pb-1 border-t border-outline-variant/30 text-[10px] font-mono text-on-surface-variant/50 truncate" title={session.user?.email ?? ''}>
+                      {session.user?.email}
+                    </div>
+                    {session.user?.role === 'owner' && (
+                      <Link
+                        href="/owner"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-primary-container" />Owner Backend
+                      </Link>
+                    )}
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); signOut() }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />Sign In
+                  </Link>
+                )
+              )}
             </div>
           )}
         </div>

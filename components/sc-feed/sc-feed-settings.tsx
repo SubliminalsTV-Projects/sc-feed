@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, Eye, EyeOff, GripVertical, LayoutTemplate, Loader2, Moon, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, X, Youtube } from 'lucide-react'
+import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ClipboardPaste, Copy, Eye, EyeOff, GripVertical, LayoutTemplate, Loader2, Moon, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, X, Youtube } from 'lucide-react'
 import { CURRENT_VERSION } from '@/lib/patch-notes'
 import type { FeedChannel } from '@/app/api/sc-feed/route'
 import { type LayoutPreset, type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed, MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS } from './sc-feed-types'
@@ -18,7 +18,7 @@ export function SettingsPanel({
   dateFormat, onSetDateFormat,
   hideAllRead, onToggleHideAllRead,
   onMarkAllRead, onMarkAllUnread,
-  layoutPresets, onSavePreset, onApplyPreset, onDeletePreset, onOverwritePreset,
+  layoutPresets, onSavePreset, onApplyPreset, onDeletePreset, onOverwritePreset, onExportLayout, onImportLayout,
   pushSupported, pushEnabled, pushPermission, pushPending, pushError, pushTestPending, pushTestStatus, onTogglePush, onTestPush,
   userYTChannels, onAddYT, onRemoveYT,
   userTwitchStreamers, onAddTwitch, onRemoveTwitch,
@@ -41,6 +41,8 @@ export function SettingsPanel({
   onApplyPreset: (preset: LayoutPreset) => void
   onDeletePreset: (id: string) => void
   onOverwritePreset: (id: string) => void
+  onExportLayout: () => string
+  onImportLayout: (text: string) => boolean
   pushSupported: boolean
   pushEnabled: boolean
   pushPermission: NotificationPermission
@@ -67,6 +69,10 @@ export function SettingsPanel({
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetNameInput, setPresetNameInput] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [importError, setImportError] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   function handleDrop(targetId: string) {
     if (!draggedId || draggedId === targetId) return
@@ -318,6 +324,57 @@ export function SettingsPanel({
             <BookmarkPlus className="w-3.5 h-3.5" />
             <span className="text-[11px] font-label font-black">Save current layout</span>
           </button>
+        )}
+
+        {/* Export / Import the current layout as portable JSON */}
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <button
+            onClick={async () => {
+              try { await navigator.clipboard.writeText(onExportLayout()); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* clipboard blocked */ }
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-outline-variant/20 hover:border-outline-variant/40 hover:bg-surface-container-high/30 transition-colors text-on-surface-variant/35 hover:text-on-surface-variant"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span className="text-[11px] font-label font-black">{copied ? 'Copied!' : 'Export'}</span>
+          </button>
+          <button
+            onClick={() => { setImporting(v => !v); setImportError(false) }}
+            className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-outline-variant/20 hover:border-outline-variant/40 hover:bg-surface-container-high/30 transition-colors text-on-surface-variant/35 hover:text-on-surface-variant"
+          >
+            <ClipboardPaste className="w-3.5 h-3.5" />
+            <span className="text-[11px] font-label font-black">Import</span>
+          </button>
+        </div>
+        {importing && (
+          <div className="mt-1.5 space-y-1.5">
+            <textarea
+              autoFocus
+              value={importText}
+              onChange={e => { setImportText(e.target.value); setImportError(false) }}
+              placeholder="Paste layout JSON…"
+              rows={4}
+              className={`w-full bg-surface-container border rounded px-2 py-1.5 text-[10px] font-mono text-on-surface placeholder:text-on-surface-variant/25 outline-none resize-y ${importError ? 'border-red-500/50' : 'border-outline-variant/30 focus:border-primary-container/50'}`}
+            />
+            {importError && <p className="text-[10px] font-label text-red-400 px-0.5">Invalid layout JSON.</p>}
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => {
+                  if (onImportLayout(importText.trim())) { setImporting(false); setImportText('') }
+                  else setImportError(true)
+                }}
+                disabled={!importText.trim()}
+                className="flex-1 px-2 py-1 rounded text-[10px] font-label font-black bg-primary-container/15 text-primary-container border border-primary-container/30 disabled:opacity-30 transition-opacity"
+              >
+                Apply
+              </button>
+              <button
+                onClick={() => { setImporting(false); setImportText(''); setImportError(false) }}
+                className="shrink-0 px-2 py-1 rounded text-[10px] font-label font-black text-on-surface-variant/40 hover:text-on-surface-variant transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
