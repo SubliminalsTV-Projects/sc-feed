@@ -71,7 +71,7 @@ export async function GET(request: Request) {
             }
             if (RSI_TOKEN && /robertsspaceindustries\.com\/spectrum\/.*\/thread\/[^/]+\/\d+$/.test(parsed.url ?? '')) {
               const devName = (parsed.body ?? '').replace(/\s*\[Reply\]\s*$/, '').trim()
-              const result = await fetchTrackerDevContent(parsed.url!)
+              const result = await fetchTrackerDevContent(parsed.url!, devName)
               parsed.body = result.body || ''
               if (devName) parsed.source = `${parsed.source}||${devName}`
               // TrackerSC bot embeds always carry the generic Spectrum OG image

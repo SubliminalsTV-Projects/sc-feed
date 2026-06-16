@@ -113,6 +113,24 @@ export function mergePipelineContinuations(msgs: DiscordMsg[]): DiscordMsg[] {
   return out.reverse()
 }
 
+// Caption-less image relays (a bare image drop, no text/embed) would otherwise
+// render as a titleless, bodiless card. Derive a title from the attachment
+// filename when it's descriptive (e.g. `may-2026-banner.webp` → "May 2026 Banner").
+// Generic auto-names (source/image/screenshot/IMG_1234/numbers) yield nothing —
+// better a bare image than a meaningless "Source" title.
+export function captionFromImageUrl(url: string): string {
+  try {
+    const file = decodeURIComponent((new URL(url).pathname.split('/').pop() ?? ''))
+    const base = file.replace(/\.[a-z0-9]+$/i, '')
+    if (/^(source|image|images|unknown|untitled|screenshot|screen[\s_-]?shot|photo|file|spoiler_.*|img[-_]?\d*|dsc[-_]?\d*)$/i.test(base)) return ''
+    const words = base.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (words.replace(/[^a-z]/gi, '').length < 3) return ''   // not enough letters to be a real caption
+    return words.replace(/\b\w/g, c => c.toUpperCase())
+  } catch {
+    return ''
+  }
+}
+
 export function parseDiscordMessage(m: DiscordMsg, channelLabel: string) {
   const embed      = m.embeds?.[0]
   const rawContent = m.content?.trim() ?? ''
@@ -204,9 +222,12 @@ export function parseDiscordMessage(m: DiscordMsg, channelLabel: string) {
 
   const lines = rawContent.split('\n')
   const textBody = lines.slice(1).join('\n').trim()
+  const imageCaption = !rawContent && !embed?.title && mediaAttachments[0]
+    ? captionFromImageUrl(mediaAttachments[0])
+    : ''
   return {
     msg_id:        m.id,
-    title:         lines[0].trim().slice(0, 150) || rawContent.slice(0, 120),
+    title:         lines[0].trim().slice(0, 150) || imageCaption || rawContent.slice(0, 120),
     body:          textBody || embed?.description || '',
     url:           embed?.url ?? '',
     source,
@@ -314,41 +335,121 @@ export function extractSpectrumContentBlocks(
   return { quote: quoteParts.join('\n'), text: textParts.join('\n'), image: imageUrl }
 }
 
-export async function fetchTrackerDevContent(url: string): Promise<{ body: string; image: string }> {
+// A nested Spectrum reply. The `thread/nested` endpoint returns replies as a
+// tree (each reply may carry its own `replies` array), so any search must recurse.
+interface SpectrumReply {
+  id?: string | number
+  content_blocks?: Array<{ type: string; data: unknown }>
+  member?: { displayname?: string }
+  time_created?: number
+  replies?: SpectrumReply[]
+}
+
+// Depth-first search for a reply by id anywhere in the nested tree.
+function findReplyById(replies: SpectrumReply[], id: string): SpectrumReply | null {
+  for (const r of replies) {
+    if (String(r.id) === id) return r
+    const hit = r.replies?.length ? findReplyById(r.replies, id) : null
+    if (hit) return hit
+  }
+  return null
+}
+
+// Latest (most recent) reply authored by a given member anywhere in the tree.
+// Used as a fallback when the exact linked reply is nested too deep to load.
+function findLatestReplyByMember(replies: SpectrumReply[], name: string): SpectrumReply | null {
+  const wanted = name.trim().toLowerCase()
+  let best: SpectrumReply | null = null
+  const walk = (rs: SpectrumReply[]) => {
+    for (const r of rs) {
+      if ((r.member?.displayname ?? '').trim().toLowerCase() === wanted) {
+        if (!best || (r.time_created ?? 0) > (best.time_created ?? 0)) best = r
+      }
+      if (r.replies?.length) walk(r.replies)
+    }
+  }
+  walk(replies)
+  return best
+}
+
+// Render a reply's content blocks to a body string, prefixing any quoted parent
+// text as a Markdown blockquote.
+function replyToBody(reply: SpectrumReply): { body: string; image: string } {
+  const { quote, text, image } = extractSpectrumContentBlocks(reply.content_blocks ?? [])
+  const parts: string[] = []
+  if (quote) parts.push(quote.split('\n').filter(l => l.trim()).map(l => `> ${l}`).join('\n'))
+  if (text) parts.push(text)
+  return { body: parts.join('\n\n'), image }
+}
+
+// Fetch one nested-thread page in a given sort order. Returns the thread root
+// (with its reply tree) or null on any failure.
+async function fetchThreadTree(slug: string, replyId: string, sort: 'newest' | 'oldest'): Promise<SpectrumReply & { content_reply_id?: string | number } | null> {
+  const res = await fetch('https://robertsspaceindustries.com/api/spectrum/forum/thread/nested', {
+    method: 'POST',
+    headers: {
+      ...SPECTRUM_HEADERS,
+      'X-Rsi-Token': RSI_TOKEN,
+      'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
+    },
+    body: JSON.stringify({ thread_id: replyId, slug, page: 1, sort }),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  return data?.success && data.data ? data.data : null
+}
+
+// TrackerSC dev-tracker URLs point at a SPECIFIC dev reply deep inside a Spectrum
+// thread (`.../thread/{slug}/{replyId}`). Three things matter:
+//   1. Search the reply tree RECURSIVELY — replies nest under conversation chains,
+//      so the target is almost never a top-level reply.
+//   2. A single page doesn't load a big thread fully, and the linked reply may be
+//      recent (loads under 'newest') OR early in a since-grown thread (loads under
+//      'oldest'). So try both sort orders before giving up.
+//   3. In very large threads the exact reply can still be nested deeper than any
+//      page loads (it appears only as a `tracked_replies_references` stub). In that
+//      case fall back to the named dev's most recent loaded reply in the same
+//      thread — same author, same topic, meaningful context. `devName` comes from
+//      the TrackerSC bot stub at the call site.
+export async function fetchTrackerDevContent(url: string, devName = ''): Promise<{ body: string; image: string }> {
   const match = url.match(/\/spectrum\/community\/[^/]+\/forum\/\d+\/thread\/([^/]+)\/(\d+)/)
   if (!match || !RSI_TOKEN) return { body: '', image: '' }
   const [, slug, replyId] = match
   try {
-    const res = await fetch('https://robertsspaceindustries.com/api/spectrum/forum/thread/nested', {
-      method: 'POST',
-      headers: {
-        ...SPECTRUM_HEADERS,
-        'X-Rsi-Token': RSI_TOKEN,
-        'Cookie':      `Rsi-Token=${RSI_TOKEN}`,
-      },
-      body: JSON.stringify({ thread_id: replyId, slug, page: 1, sort: 'oldest' }),
-    })
-    if (!res.ok) return { body: '', image: '' }
-    const data = await res.json()
-    if (!data.success) return { body: '', image: '' }
-    const thread = data.data
-    if (!thread) return { body: '', image: '' }
+    const trees: Array<SpectrumReply & { content_reply_id?: string | number }> = []
+    // 'newest' first — covers fresh dev replies (the common case) without a second
+    // round-trip. Only fetch 'oldest' if 'newest' didn't already resolve the body.
+    for (const sort of ['newest', 'oldest'] as const) {
+      const thread = await fetchThreadTree(slug, replyId, sort)
+      if (!thread) continue
+      trees.push(thread)
 
-    const isOp = String(thread.content_reply_id) === String(replyId)
+      // Dev is the original poster.
+      if (String(thread.content_reply_id) === String(replyId)) {
+        const { text, image } = extractSpectrumContentBlocks(thread.content_blocks ?? [])
+        if (text || image) return { body: text, image }
+      }
 
-    if (isOp) {
-      const { text, image } = extractSpectrumContentBlocks(thread.content_blocks ?? [])
-      return { body: text, image }
+      // Exact linked reply, found anywhere in this tree.
+      const target = findReplyById(thread.replies ?? [], String(replyId))
+      if (target) {
+        const result = replyToBody(target)
+        if (result.body || result.image) return result
+      }
     }
 
-    const replies: Array<{ id?: string | number; content_blocks?: Array<{ type: string; data: unknown }> }> = thread.replies ?? []
-    const target = replies.find(r => String(r.id) === String(replyId))
-    if (!target) return { body: '', image: '' }
-    const { quote, text } = extractSpectrumContentBlocks(target.content_blocks ?? [])
-    const parts: string[] = []
-    if (quote) parts.push(quote.split('\n').filter(l => l.trim()).map(l => `> ${l}`).join('\n'))
-    if (text) parts.push(text)
-    return { body: parts.join('\n\n'), image: '' }
+    // Fallback: exact reply was nested too deep to load on either page — use the
+    // named dev's most recent reply across both trees instead of a blank card.
+    if (devName) {
+      let best: SpectrumReply | null = null
+      for (const t of trees) {
+        const cand = findLatestReplyByMember(t.replies ?? [], devName)
+        if (cand && (!best || (cand.time_created ?? 0) > (best.time_created ?? 0))) best = cand
+      }
+      if (best) return replyToBody(best)
+    }
+
+    return { body: '', image: '' }
   } catch {
     return { body: '', image: '' }
   }
