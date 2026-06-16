@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, BookOpen, ChevronDown, ChevronUp, FileDiff } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { KbDiffModal } from './sc-feed-kb-diff-modal'
+import { MessageModal } from './sc-feed-message-modal'
 import { timeAgo } from './sc-feed-utils'
 
 /**
@@ -13,7 +14,7 @@ import { timeAgo } from './sc-feed-utils'
  * first-class element here: an inline preview of the change + a "View full diff" action,
  * never a truncatable footer pill.
  */
-export function KbCard({ msg, isRead, onMarkRead }: {
+export function KbCard({ msg, channelId, isRead, onMarkRead }: {
   msg: FeedMessage
   channelId: string
   blurred?: boolean
@@ -22,6 +23,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
   onMarkRead?: () => void
 }) {
   const [diffOpen, setDiffOpen] = useState(false)
+  const [readerOpen, setReaderOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -30,6 +32,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
   const title = msg.title.replace(/^\[Updated\]\s*/i, '').trim()
 
   const openDiff = () => { setDiffOpen(true); onMarkRead?.() }
+  const openReader = () => { setReaderOpen(true); onMarkRead?.() }
 
   // Match the shared card's expand affordance: clamp the excerpt, show a chevron
   // only when there's more article to reveal.
@@ -55,18 +58,12 @@ export function KbCard({ msg, isRead, onMarkRead }: {
           </span>
         </div>
 
-        <a
-          href={msg.url || undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => onMarkRead?.()}
-          className="group block"
-        >
+        <button onClick={openReader} className="group block w-full text-left cursor-pointer">
           <h3 className="text-[13px] font-headline font-black text-on-surface leading-snug group-hover:text-primary-container transition-colors">
             {title}
             <ArrowUpRight className="inline w-3 h-3 ml-0.5 align-text-top text-on-surface-variant/40 group-hover:text-primary-container" />
           </h3>
-        </a>
+        </button>
 
         {hasChange && diff?.preview && (
           <button
@@ -116,6 +113,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
       )}
 
       {diffOpen && <KbDiffModal msgId={msg.id} title={title} onClose={() => setDiffOpen(false)} />}
+      {readerOpen && <MessageModal msg={msg} channelId={channelId} onClose={() => setReaderOpen(false)} />}
     </article>
   )
 }

@@ -11,6 +11,7 @@ import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { PILL, PIPELINE_CHANNEL_IDS, TRACKER_CATS, useFeedPrefs } from './sc-feed-types'
 import { formatLocalTime, getSourceInfo, getTrackerCatKey, isKbMessage, normalizeBodyMarkdown, stripDiscordMarkdown, timeAgo } from './sc-feed-utils'
 import { KbCard } from './sc-feed-kb-card'
+import { MessageModal } from './sc-feed-message-modal'
 
 export function PillsRow({ pills, className = '' }: {
   pills: { key: string; node: React.ReactNode }[]
@@ -91,21 +92,22 @@ export function CompactRow({ msg, blurred, channelId, lastSeen, isRead, onMarkRe
   const trackerCat = trackerKey ? TRACKER_CATS[trackerKey] : undefined
   const sourceInfo = getSourceInfo(msg.url)
   const showSource = sourceInfo && msg.url && !(trackerCat && sourceInfo.label === trackerCat.label)
-  const dest = msg.url || msg.discord_jump_url
   const cleanTitle = stripDiscordMarkdown(msg.title ?? '')
+  const [readerOpen, setReaderOpen] = useState(false)
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (blurred || !dest) return
+    if (blurred) return
     if ((e.target as HTMLElement).closest('a, button')) return
-    window.open(dest, '_blank', 'noopener,noreferrer')
+    setReaderOpen(true)
   }
 
   return (
     <div
       onClick={handleClick}
-      className={`relative px-2.5 py-2 flex items-start gap-2 transition-all ${dest && !blurred ? 'cursor-pointer hover:bg-surface-container/60' : ''
+      className={`relative px-2.5 py-2 flex items-start gap-2 transition-all ${!blurred ? 'cursor-pointer hover:bg-surface-container/60' : ''
         } ${blurred ? 'blur-sm select-none' : ''} ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}
     >
+      {readerOpen && <MessageModal msg={msg} channelId={channelId} onClose={() => setReaderOpen(false)} />}
       {onMarkRead ? (
         <button
           onClick={e => { e.stopPropagation(); onMarkRead() }}
@@ -121,14 +123,7 @@ export function CompactRow({ msg, blurred, channelId, lastSeen, isRead, onMarkRe
         isNew && <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-primary-container shrink-0" />
       )}
       <div className="flex-1 min-w-0">
-        {msg.url ? (
-          <a href={msg.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="text-[13px] font-headline font-black text-on-surface hover:text-primary-container transition-colors leading-snug block">
-            {cleanTitle}
-          </a>
-        ) : (
-          <p className="text-[13px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
-        )}
+        <p className="text-[13px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
         {!hidePills && (() => {
           type P = { key: string; node: React.ReactNode }
           const pills: P[] = []
@@ -318,11 +313,11 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
   const showSource = sourceInfo && msg.url && !(trackerCat && sourceInfo.label === trackerCat.label)
   const isNew = typeof lastSeen === 'string' && msg.ts_raw ? msg.ts_raw > lastSeen : false
 
-  const dest = !blurred ? (msg.url || msg.discord_jump_url) : undefined
+  const [readerOpen, setReaderOpen] = useState(false)
   const handleCardClick = (e: React.MouseEvent<HTMLElement>) => {
-    if (!dest) return
+    if (blurred) return
     if ((e.target as HTMLElement).closest('a, button')) return
-    window.open(dest, '_blank', 'noopener,noreferrer')
+    setReaderOpen(true)
   }
 
   useEffect(() => {
@@ -353,9 +348,10 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
       >
     <article
       onClick={handleCardClick}
-      className={`relative rounded-xl bg-surface-container-low border border-outline-variant/40 overflow-hidden transition-all ${dest ? 'cursor-pointer hover:border-outline-variant/70' : 'hover:border-outline-variant/70'
+      className={`relative rounded-xl bg-surface-container-low border border-outline-variant/40 overflow-hidden transition-all ${blurred ? 'hover:border-outline-variant/70' : 'cursor-pointer hover:border-outline-variant/70'
         } ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}
     >
+      {readerOpen && <MessageModal msg={msg} channelId={channelId} onClose={() => setReaderOpen(false)} />}
       {blurred && (
         <div className="absolute inset-0 z-10 flex items-center justify-center">
           <span className="text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/50 px-3 text-center leading-relaxed">Reveal Leaks<br/>in Settings</span>
@@ -363,17 +359,7 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
       )}
       {(isMultiMedia || isSingleAudio) && (
         <div className={`px-2.5 pt-2.5 pb-1 ${blurred ? 'blur-sm select-none' : ''}`}>
-          {msg.url ? (
-            <a href={msg.url} target="_blank" rel="noopener noreferrer"
-               onClick={e => e.stopPropagation()}
-               className="block group">
-              <span className="text-[15px] font-headline font-black text-on-surface leading-snug group-hover:text-primary-container transition-colors">
-                {cleanTitle}
-              </span>
-            </a>
-          ) : (
-            <p className="text-[15px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
-          )}
+          <p className="text-[15px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
         </div>
       )}
       {images.length > 0 && !imgError && (() => {
@@ -567,15 +553,9 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
 
       {(!(isMultiMedia || isSingleAudio) || hasBody) && (
       <div className={`p-2.5 space-y-1.5 transition-all ${blurred ? 'blur-sm select-none' : ''}`}>
-        {!(isMultiMedia || isSingleAudio) && (msg.url ? (
-          <a href={msg.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="block group">
-            <span className="text-[15px] font-headline font-black text-on-surface leading-snug group-hover:text-primary-container transition-colors">
-              {cleanTitle}
-            </span>
-          </a>
-        ) : (
+        {!(isMultiMedia || isSingleAudio) && (
           <p className="text-[15px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
-        ))}
+        )}
 
         {hasBody && (
           <div>
