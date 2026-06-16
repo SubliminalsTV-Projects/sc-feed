@@ -34,15 +34,16 @@ export interface FeedChannel {
   }
 }
 
-// Build a short preview from a Knowledge Base article's normalized body (already
-// newline-delimited plaintext from the snapshot). Drops a leading line that just
-// repeats the title, then trims to a sentence-ish length so the card stays compact.
+// Build the preview body for a Knowledge Base article from its normalized snapshot
+// (already newline-delimited plaintext). Drops a leading line that just repeats the
+// title and keeps paragraph breaks so the card can clamp to a few lines and expand
+// to the full article. Capped to bound payload size.
 function kbExcerpt(bodyNormalized: string, title: string): string {
   let lines = bodyNormalized.split('\n').map(l => l.trim()).filter(Boolean)
   const t = title.replace(/^\[Updated\]\s*/i, '').trim().toLowerCase()
   if (lines[0]?.toLowerCase() === t) lines = lines.slice(1)
-  let text = lines.join(' ').replace(/\s+/g, ' ').trim()
-  if (text.length > 260) text = text.slice(0, 260).replace(/\s+\S*$/, '') + '…'
+  let text = lines.join('\n').trim()
+  if (text.length > 2000) text = text.slice(0, 2000).replace(/\s+\S*$/, '') + '…'
   return text
 }
 

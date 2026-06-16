@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ArrowUpRight, BookOpen, FileDiff } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, BookOpen, ChevronDown, ChevronUp, FileDiff } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { KbDiffModal } from './sc-feed-kb-diff-modal'
 import { timeAgo } from './sc-feed-utils'
@@ -22,11 +22,26 @@ export function KbCard({ msg, isRead, onMarkRead }: {
   onMarkRead?: () => void
 }) {
   const [diffOpen, setDiffOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [isTruncated, setIsTruncated] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const diff = msg.kbDiff
   const hasChange = !!diff && (diff.added > 0 || diff.removed > 0)
   const title = msg.title.replace(/^\[Updated\]\s*/i, '').trim()
 
   const openDiff = () => { setDiffOpen(true); onMarkRead?.() }
+
+  // Match the shared card's expand affordance: clamp the excerpt, show a chevron
+  // only when there's more article to reveal.
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || expanded) return
+    const check = () => setIsTruncated(el.scrollHeight > el.clientHeight + 2)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [expanded, diff?.excerpt])
 
   return (
     <article className={`rounded-xl bg-surface-container-low border border-outline-variant/40 overflow-hidden hover:border-outline-variant/70 transition-all ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}>
@@ -66,9 +81,22 @@ export function KbCard({ msg, isRead, onMarkRead }: {
         )}
 
         {!hasChange && diff?.excerpt && (
-          <p className="mt-1.5 text-[12px] font-body leading-relaxed text-on-surface-variant/70 line-clamp-3">
-            {diff.excerpt}
-          </p>
+          <div className="mt-1.5">
+            <div
+              ref={bodyRef}
+              className={`${expanded ? '' : 'line-clamp-3'} text-[12px] font-body leading-relaxed text-on-surface-variant/70 whitespace-pre-line`}
+            >
+              {diff.excerpt}
+            </div>
+            {(isTruncated || expanded) && (
+              <button
+                onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+                className="w-full flex justify-center pt-1 text-primary-container/60 hover:text-primary-container transition-colors"
+              >
+                {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
