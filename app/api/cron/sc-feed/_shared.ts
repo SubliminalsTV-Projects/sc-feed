@@ -299,11 +299,53 @@ export async function fetchSpectrumThreadBodyByUrl(url: string): Promise<{ body:
   }
 }
 
+// Spectrum stores rich text as Draft.js raw content: each block has a `type`
+// (unstyled / header-* / unordered-list-item / blockquote / …) and `inlineStyleRanges`
+// (BOLD/ITALIC/CODE spans). Convert that to Markdown so the cards render headings,
+// lists, and emphasis instead of one flattened paragraph.
+type DraftStyleRange = { offset: number; length: number; style: string }
+type DraftBlock = { text?: string; type?: string; inlineStyleRanges?: DraftStyleRange[] }
+type DraftDoc  = { blocks?: DraftBlock[] }
+
+function applyInlineStyles(text: string, ranges: DraftStyleRange[] = []): string {
+  const marker = (s: string) => (s === 'BOLD' ? '**' : s === 'ITALIC' ? '_' : s === 'CODE' ? '`' : '')
+  const marks: Array<{ pos: number; ins: string; open: boolean }> = []
+  for (const r of ranges) {
+    const m = marker(r.style)
+    if (!m || r.length <= 0) continue
+    marks.push({ pos: r.offset, ins: m, open: true })
+    marks.push({ pos: r.offset + r.length, ins: m, open: false })
+  }
+  if (!marks.length) return text
+  marks.sort((a, b) => a.pos - b.pos || (a.open === b.open ? 0 : a.open ? 1 : -1))
+  let out = '', last = 0
+  for (const mk of marks) { out += text.slice(last, mk.pos) + mk.ins; last = mk.pos }
+  return out + text.slice(last)
+}
+
+function draftBlocksToMarkdown(blocks: DraftBlock[] = []): string {
+  const lines = blocks.map(b => {
+    const text = applyInlineStyles(b.text ?? '', b.inlineStyleRanges)
+    switch (b.type) {
+      case 'header-one':          return `# ${text}`
+      case 'header-two':          return `## ${text}`
+      case 'header-three':        return `### ${text}`
+      case 'header-four':
+      case 'header-five':
+      case 'header-six':          return `#### ${text}`
+      case 'unordered-list-item': return `- ${text}`
+      case 'ordered-list-item':   return `1. ${text}`
+      case 'blockquote':          return `> ${text}`
+      default:                    return text
+    }
+  })
+  // Blank Draft blocks already separate paragraphs; collapse runs of 3+ newlines.
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function extractSpectrumContentBlocks(
   contentBlocks: Array<{ type: string; data: unknown }>
 ): { quote: string; text: string; image: string } {
-  type DraftBlock = { text?: string }
-  type DraftDoc  = { blocks?: DraftBlock[] }
   type TextInner = { type: string; data?: DraftDoc }
   const quoteParts: string[] = []
   const textParts:  string[] = []
@@ -313,16 +355,13 @@ export function extractSpectrumContentBlocks(
     if (block.type === 'quote') {
       for (const inner of (block.data as TextInner[] ?? [])) {
         if (inner.type === 'text') {
-          for (const b of inner.data?.blocks ?? []) {
-            if (b.text?.trim()) quoteParts.push(b.text)
-          }
+          const md = draftBlocksToMarkdown(inner.data?.blocks)
+          if (md) quoteParts.push(md)
         }
       }
     } else if (block.type === 'text') {
-      const doc = block.data as DraftDoc
-      for (const b of doc.blocks ?? []) {
-        if (b.text?.trim()) textParts.push(b.text)
-      }
+      const md = draftBlocksToMarkdown((block.data as DraftDoc).blocks)
+      if (md) textParts.push(md)
     } else if (block.type === 'image' && !imageUrl) {
       type UploadItem = { data?: { url?: string; sizes?: { large?: { url?: string }; medium?: { url?: string } } } }
       const items = Array.isArray(block.data) ? (block.data as UploadItem[]) : []
@@ -333,7 +372,7 @@ export function extractSpectrumContentBlocks(
     }
   }
 
-  return { quote: quoteParts.join('\n'), text: textParts.join('\n'), image: imageUrl }
+  return { quote: quoteParts.join('\n\n'), text: textParts.join('\n\n'), image: imageUrl }
 }
 
 // A nested Spectrum reply. The `thread/nested` endpoint returns replies as a
@@ -383,29 +422,33 @@ function findLatestReplyByMember(replies: SpectrumReply[], name: string): ReplyH
 
 const PARENT_CTX_MAX = 280   // cap the "replying to" context so the dev reply stays the focus
 
-// Render a reply to a body string. When the reply is answering ANOTHER reply
-// (not the OP), prepend a Markdown blockquote naming who they replied to and what
-// that person said — otherwise the dev's answer floats with no context. Replies
-// to the OP get no prefix: the card title already carries the thread topic.
+// Flatten Markdown to a short plain-text snippet for the "replying to" blockquote.
+function stripMarkdown(md: string): string {
+  return md
+    .replace(/^\s*#{1,6}\s+/gm, '')   // headings
+    .replace(/^\s*[->]\s+/gm, '')     // list / quote markers
+    .replace(/[*_`]/g, '')            // emphasis / code
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Render a reply to a body string. Always prepend what the dev was answering — the
+// parent reply's text (nested) or the explicit quote block the reply carried — as a
+// short blockquote, then the dev's own answer (formatted Markdown). Without it the
+// answer floats with no context.
 function replyToBody(hit: ReplyHit): { body: string; image: string } {
   const { node, parent } = hit
   const { quote, text, image } = extractSpectrumContentBlocks(node.content_blocks ?? [])
   const parts: string[] = []
 
-  // Only surface context when answering ANOTHER reply (parent_reply_reference set).
-  // A null reference means a top-level reply to the OP — per the display rule we
-  // don't echo the original post; the card title already carries the thread topic.
   const ref = node.parent_reply_reference
-  if (ref) {
-    // Prefer the parent's own text from the tree; fall back to any quote block the
-    // reply explicitly carried (used when the parent itself wasn't loaded).
-    const parentText = (parent ? extractSpectrumContentBlocks(parent.content_blocks ?? []).text : '') || quote
-    let ctx = parentText.replace(/\s+/g, ' ').trim()
-    if (ctx) {
-      if (ctx.length > PARENT_CTX_MAX) ctx = ctx.slice(0, PARENT_CTX_MAX).replace(/\s+\S*$/, '') + '…'
-      const author = (ref.label || parent?.member?.displayname || '').trim()
-      parts.push(`> ${author ? `**${author}:** ` : ''}${ctx}`)
-    }
+  // Prefer the parent reply's text (nested reply); else the explicit quote block.
+  const parentMd = ref && parent ? extractSpectrumContentBlocks(parent.content_blocks ?? []).text : ''
+  let ctx = stripMarkdown(parentMd || quote)
+  if (ctx) {
+    if (ctx.length > PARENT_CTX_MAX) ctx = ctx.slice(0, PARENT_CTX_MAX).replace(/\s+\S*$/, '') + '…'
+    const author = (ref?.label || (ref && parent?.member?.displayname) || '').trim()
+    parts.push(`> ${author ? `**${author}:** ` : ''}${ctx}`)
   }
 
   if (text) parts.push(text)
