@@ -93,6 +93,12 @@ export function getTrackerCatKey(source: string): string | undefined {
   return ALL_TRACKER_KEYS.find(k => lower.includes(k.toLowerCase()))
 }
 
+/** Knowledge Base cards (TrackerSC → Zendesk article) get their own display path (KbCard).
+ *  Keyed on source so it works in any channel context (regular column + OmniFeed). */
+export function isKbMessage(m: { source?: string }): boolean {
+  return getTrackerCatKey(m.source ?? '') === 'Knowledge Base'
+}
+
 export function getFeedLabel(id: string, channels: FeedChannel[]): string {
   if (id === OMNI_FEED_ID) return 'Omni Feed'
   if (id === MOTD_UNIFIED_ID) return 'MOTD'
@@ -153,14 +159,16 @@ export function groupByWindow(
   let i = 0
   const hasLongBody = (m: FeedMessage) => (m.body?.trim().length ?? 0) > 150
   while (i < messages.length) {
-    // Messages with images or substantial body content are always standalone — never collapse into CompactRow
-    if (messages[i].image || hasLongBody(messages[i])) { out.push(messages[i]); i++; continue }
+    // Messages with images or substantial body, and KB cards (their own card type), are always
+    // standalone — never collapse into a CompactRow group.
+    if (messages[i].image || hasLongBody(messages[i]) || isKbMessage(messages[i])) { out.push(messages[i]); i++; continue }
     const base = messages[i].ts_raw ? new Date(messages[i].ts_raw!).getTime() : null
     if (!base) { out.push(messages[i]); i++; continue }
     let j = i + 1
     while (j < messages.length) {
       if (messages[j].image) break  // image message breaks the window
       if (hasLongBody(messages[j])) break  // body-heavy message breaks the window
+      if (isKbMessage(messages[j])) break  // KB cards never join a group
       const t = messages[j].ts_raw ? new Date(messages[j].ts_raw!).getTime() : null
       if (!t || (base - t) > GROUP_WINDOW_MS) break
       j++

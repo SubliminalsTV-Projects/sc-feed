@@ -9,8 +9,8 @@ const ReactMarkdown = dynamic(() => import('react-markdown'), { ssr: false, load
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Expand, ExternalLink, Film, Music, Sparkles, X } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { PILL, PIPELINE_CHANNEL_IDS, TRACKER_CATS, useFeedPrefs } from './sc-feed-types'
-import { formatLocalTime, getSourceInfo, getTrackerCatKey, normalizeBodyMarkdown, stripDiscordMarkdown, timeAgo } from './sc-feed-utils'
-import { KbDiffButton } from './sc-feed-kb-diff-modal'
+import { formatLocalTime, getSourceInfo, getTrackerCatKey, isKbMessage, normalizeBodyMarkdown, stripDiscordMarkdown, timeAgo } from './sc-feed-utils'
+import { KbCard } from './sc-feed-kb-card'
 
 export function PillsRow({ pills, className = '' }: {
   pills: { key: string; node: React.ReactNode }[]
@@ -135,7 +135,6 @@ export function CompactRow({ msg, blurred, channelId, lastSeen, isRead, onMarkRe
           if (isTrackerSC) pills.push({ key: 'tsc', node: <a href="https://www.trackersc.com/" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} border-outline-variant/40 bg-surface-container text-on-surface-variant/60 hover:text-on-surface hover:border-outline-variant`}>Tracker SC</a> })
           if (trackerCat) { const Icon = trackerCat.icon; pills.push({ key: 'cat', node: <span className={`${PILL} ${trackerCat.cls}`}><Icon className="w-2.5 h-2.5" />{trackerCat.label}</span> }) }
           if (showSource) pills.push({ key: 'src', node: <a href={msg.url!} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} ${sourceInfo!.cls}`}>{sourceInfo!.label}</a> })
-          if (msg.kbDiff) pills.push({ key: 'kbdiff', node: <KbDiffButton msg={msg} /> })
           if (msg.discord_jump_url && !isTrackerSC) pills.push({ key: 'disc', node: <a href={msg.discord_jump_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20`}>{isPipeline ? 'Pipeline' : 'Post'}</a> })
           return pills.length > 0 ? <PillsRow pills={pills} className="mt-0.5" /> : null
         })()}
@@ -178,7 +177,6 @@ export function GroupedCard({ messages, blurred, channelId, lastSeen, isReadMsg,
   if (isTrackerSC) footerPills.push({ key: 'tsc', node: <a href="https://www.trackersc.com/" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} border-outline-variant/40 bg-surface-container text-on-surface-variant/60 hover:text-on-surface hover:border-outline-variant`}>Tracker SC</a> })
   if (newestTrackerCat) { const Icon = newestTrackerCat.icon; footerPills.push({ key: 'cat', node: <span className={`${PILL} ${newestTrackerCat.cls}`}><Icon className="w-2.5 h-2.5" />{newestTrackerCat.label}</span> }) }
   if (showNewestSource && !newest.tag) footerPills.push({ key: 'src', node: <a href={newest.url!} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} ${newestSourceInfo!.cls}`}>{newestSourceInfo!.label}</a> })
-  if (newest.kbDiff) footerPills.push({ key: 'kbdiff', node: <KbDiffButton msg={newest} /> })
   if (newest.discord_jump_url && !isTrackerSC) footerPills.push({ key: 'disc', node: <a href={newest.discord_jump_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20`}>{isPipeline ? 'Pipeline' : 'Post'}</a> })
 
   return (
@@ -217,12 +215,24 @@ export function GroupedCard({ messages, blurred, channelId, lastSeen, isReadMsg,
   )
 }
 
-export function MessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isRead, onMarkRead }: {
+type MessageCardProps = {
   msg: FeedMessage; blurred: boolean; channelId?: string; lastSeen?: string | null
   motdLabels?: string[]
   isRead?: boolean
   onMarkRead?: () => void
-}) {
+}
+
+// Display-isolation dispatcher: KB cards own their entire rendering path (KbCard).
+// Every card type that needs bespoke display gets its own component here, NOT a branch
+// threaded through GenericMessageCard. See the display-isolation rule in the dev-sc-feed skill.
+export function MessageCard(props: MessageCardProps) {
+  if (isKbMessage(props.msg)) {
+    return <KbCard msg={props.msg} channelId={props.channelId ?? ''} blurred={props.blurred} lastSeen={props.lastSeen} isRead={props.isRead} onMarkRead={props.onMarkRead} />
+  }
+  return <GenericMessageCard {...props} />
+}
+
+function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isRead, onMarkRead }: MessageCardProps) {
   const { dateFormat } = useFeedPrefs()
   const [imgError, setImgError] = useState(false)
   const [imgIndex, setImgIndex] = useState(0)
@@ -609,7 +619,6 @@ export function MessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
           if (trackerCat) { const Icon = trackerCat.icon; pills.push({ key: 'cat', node: <span className={`${PILL} ${trackerCat.cls}`}><Icon className="w-2.5 h-2.5" />{trackerCat.label}</span> }) }
           if (msg.dev) pills.push({ key: 'dev', node: <span className={`${PILL} border-teal-500/40 bg-teal-500/10 text-teal-400`}>{msg.dev}</span> })
           if (showSource && !msg.tag) pills.push({ key: 'src', node: <a href={msg.url!} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} ${sourceInfo!.cls}`}>{sourceInfo!.label}</a> })
-          if (msg.kbDiff) pills.push({ key: 'kbdiff', node: <KbDiffButton msg={msg} /> })
           if (msg.discord_jump_url && !isTrackerSC) pills.push({ key: 'disc', node: <a href={msg.discord_jump_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className={`${PILL} border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300`}>{isPipeline ? 'Pipeline' : 'Post'}</a> })
           return <PillsRow pills={pills} className="flex-1 min-w-0" />
         })()}

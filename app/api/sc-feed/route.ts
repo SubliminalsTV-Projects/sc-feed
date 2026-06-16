@@ -18,7 +18,7 @@ export interface FeedMessage {
   discord_jump_url?: string
   tag?: string
   dev?: string
-  kbDiff?: { summary: string; added: number; removed: number }
+  kbDiff?: { summary: string; added: number; removed: number; preview?: string }
 }
 
 export interface FeedChannel {
@@ -211,12 +211,12 @@ export async function GET() {
         `${PB_URL}/api/collections/sc_feed_kb_diffs/records?perPage=100&filter=${filter}`,
         { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
       ).then(r => r.ok ? r.json() : null).catch(() => null)
-      const byMsg = new Map<string, { summary: string; added: number; removed: number }>(
-        (diffs?.items ?? []).map((d: { msg_id: string; summary: string; added: number; removed: number }) => [d.msg_id, d])
+      const byMsg = new Map<string, { summary: string; added: number; removed: number; preview_html?: string }>(
+        (diffs?.items ?? []).map((d: { msg_id: string; summary: string; added: number; removed: number; preview_html?: string }) => [d.msg_id, d])
       )
       for (const m of cig.messages) {
         const d = byMsg.get(m.id)
-        if (d && (d.added > 0 || d.removed > 0)) m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed }
+        if (d && (d.added > 0 || d.removed > 0)) m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed, preview: d.preview_html }
       }
     }
 

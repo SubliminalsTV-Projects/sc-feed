@@ -839,17 +839,46 @@ function renderRun(tag: 'ins' | 'del' | null, toks: string[]): string {
   return `<${tag} style="${style}">${html}</${tag}>`
 }
 
-/** Word-level LCS diff of two normalized texts → rendered HTML + add/remove word counts.
- *  Falls back to a coarse whole-block replace if the token product is too large to DP. */
-export function wordDiff(oldText: string, newText: string): { html: string; added: number; removed: number } {
+type DiffRun = { tag: 'ins' | 'del' | null; toks: string[] }
+
+/** Compact one-line preview centered on the changed region (a few words of context
+ *  each side, capped), for the card face. Newlines collapsed — this is a teaser. */
+function buildKbPreview(runs: DiffRun[]): string {
+  const words = (toks: string[]) => toks.filter(t => t !== '\n')
+  const changed = runs.map((r, i) => (r.tag ? i : -1)).filter(i => i >= 0)
+  if (!changed.length) return ''
+  const first = changed[0], last = changed[changed.length - 1]
+  const slice: DiffRun[] = []
+  if (first > 0) {
+    const ctx = words(runs[first - 1].toks)
+    slice.push({ tag: null, toks: ctx.length > 6 ? ['…', ...ctx.slice(-6)] : ctx })
+  }
+  let budget = 44
+  for (let k = first; k <= last && budget > 0; k++) {
+    const w = words(runs[k].toks).slice(0, budget)
+    budget -= w.length
+    slice.push({ tag: runs[k].tag, toks: w })
+  }
+  if (last < runs.length - 1) {
+    const ctx = words(runs[last + 1].toks)
+    slice.push({ tag: null, toks: ctx.length > 6 ? [...ctx.slice(0, 6), '…'] : ctx })
+  }
+  return slice.map(r => renderRun(r.tag, r.toks)).join(' ')
+}
+
+/** Word-level LCS diff of two normalized texts → rendered HTML, add/remove counts, and a
+ *  compact preview. Falls back to a coarse whole-block replace if too large to DP. */
+export function wordDiff(oldText: string, newText: string): { html: string; added: number; removed: number; preview: string } {
   const a = tokenizeKb(oldText)
   const b = tokenizeKb(newText)
   const countWords = (toks: string[]) => toks.filter(t => t !== '\n').length
 
   if (a.length * b.length > 6_000_000) {
+    const noNl = (t: string) => t !== '\n'
     return {
       html: renderRun('del', a) + '<br><br>' + renderRun('ins', b),
       added: countWords(b), removed: countWords(a),
+      preview: renderRun('del', a.filter(noNl).slice(0, 18)) + ' … ' + renderRun('ins', b.filter(noNl).slice(0, 18)),
     }
   }
 
@@ -870,23 +899,25 @@ export function wordDiff(oldText: string, newText: string): { html: string; adde
   while (i < n) ops.push({ t: 'del', tok: a[i++] })
   while (j < m) ops.push({ t: 'add', tok: b[j++] })
 
-  let added = 0, removed = 0
-  const parts: string[] = []
-  let run: Op[] = []
-  const flush = () => {
-    if (!run.length) return
-    const tag = run[0].t === 'eq' ? null : run[0].t === 'add' ? 'ins' : 'del'
-    parts.push(renderRun(tag, run.map(o => o.tok)))
-    if (tag === 'ins') added += countWords(run.map(o => o.tok))
-    if (tag === 'del') removed += countWords(run.map(o => o.tok))
-    run = []
-  }
+  const runs: DiffRun[] = []
+  let cur: { t: 'eq' | 'add' | 'del'; toks: string[] } | null = null
+  const tagOf = (t: 'eq' | 'add' | 'del') => (t === 'eq' ? null : t === 'add' ? 'ins' : 'del')
   for (const op of ops) {
-    if (run.length && run[0].t !== op.t) flush()
-    run.push(op)
+    if (!cur || cur.t !== op.t) {
+      if (cur) runs.push({ tag: tagOf(cur.t), toks: cur.toks })
+      cur = { t: op.t, toks: [] }
+    }
+    cur.toks.push(op.tok)
   }
-  flush()
-  return { html: parts.join(' ').replace(/ <br> /g, '<br>'), added, removed }
+  if (cur) runs.push({ tag: tagOf(cur.t), toks: cur.toks })
+
+  let added = 0, removed = 0
+  for (const r of runs) {
+    if (r.tag === 'ins') added += countWords(r.toks)
+    if (r.tag === 'del') removed += countWords(r.toks)
+  }
+  const html = runs.map(r => renderRun(r.tag, r.toks)).join(' ').replace(/ <br> /g, '<br>')
+  return { html, added, removed, preview: buildKbPreview(runs) }
 }
 
 async function fetchZendeskArticle(id: string, locale: string): Promise<{ body: string; title: string; edited_at: string } | null> {
@@ -925,10 +956,10 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
     .then(r => r.json()).catch(() => null)
   const snap = snapRes?.items?.[0]
 
-  let added = 0, removed = 0, html = '', summary = ''
+  let added = 0, removed = 0, html = '', summary = '', preview = ''
   if (snap?.body_normalized && snap.body_normalized !== current) {
     const d = wordDiff(snap.body_normalized, current)
-    added = d.added; removed = d.removed; html = d.html
+    added = d.added; removed = d.removed; html = d.html; preview = d.preview
     summary = `+${added} / −${removed}`
   }
 
@@ -937,7 +968,7 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
     method: 'POST', headers,
     body: JSON.stringify({
       msg_id: parsed.msg_id, article_id: articleId, summary, added, removed,
-      diff_html: html, title: art.title || parsed.title, url: parsed.url,
+      diff_html: html, preview_html: preview, title: art.title || parsed.title, url: parsed.url,
     }),
   }).catch(() => {})
 

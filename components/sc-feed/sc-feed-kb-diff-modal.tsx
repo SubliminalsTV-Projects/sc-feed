@@ -2,35 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { FileDiff, X } from 'lucide-react'
-import type { FeedMessage } from '@/app/api/sc-feed/route'
-import { PILL } from './sc-feed-types'
-
-/** Footer pill for a Knowledge Base card that has a change diff. Opens the detail view. */
-export function KbDiffButton({ msg }: { msg: FeedMessage }) {
-  const [open, setOpen] = useState(false)
-  if (!msg.kbDiff) return null
-  return (
-    <>
-      <button
-        onClick={e => { e.stopPropagation(); setOpen(true) }}
-        title="See what changed in this Knowledge Base article"
-        className={`${PILL} border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 cursor-pointer`}
-      >
-        <FileDiff className="w-2.5 h-2.5" />
-        {msg.kbDiff.summary}
-      </button>
-      {open && <KbDiffModal msgId={msg.id} title={msg.title} onClose={() => setOpen(false)} />}
-    </>
-  )
-}
+import { X } from 'lucide-react'
 
 type DiffState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; html: string; summary: string; url: string }
 
-function KbDiffModal({ msgId, title, onClose }: { msgId: string; title: string; onClose: () => void }) {
+/** "What Changed" detail view for a Knowledge Base card. Fetches the full stored diff
+ *  on demand by msg_id and renders it with green/red highlighting. */
+export function KbDiffModal({ msgId, title, onClose }: { msgId: string; title: string; onClose: () => void }) {
   const [state, setState] = useState<DiffState>({ status: 'loading' })
 
   useEffect(() => {
