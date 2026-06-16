@@ -812,67 +812,77 @@ export async function fetchRsiStatusRss(): Promise<number> {
 
 // ---------- reddit (used inline for cig-news enrichment) ----------
 
-export async function fetchRedditBody(url: string): Promise<string> {
-  const match = url.match(/reddit\.com\/r\/\w+\/comments\/([a-zA-Z0-9]+)/)
-  if (!match) return ''
+// Reddit killed the unauthenticated .json API (403 from any server/UA) and gated app
+// creation behind manual approval, so OAuth isn't available either. old.reddit.com still
+// serves the comment thread as public, server-rendered HTML — we parse that. No credentials.
+const REDDIT_UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0'
+const turndownReddit = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', emDelimiter: '*' })
+
+async function fetchOldRedditHtml(path: string): Promise<string> {
   try {
-    const res = await fetch(
-      `https://www.reddit.com/comments/${match[1]}.json?limit=1&raw_json=1`,
-      { headers: { 'User-Agent': 'sc-feed-bot/1.0 (subliminal.gg)' } }
-    )
-    if (!res.ok) return ''
-    const data = await res.json()
-    const selftext: string = data?.[0]?.data?.children?.[0]?.data?.selftext ?? ''
-    if (!selftext || selftext === '[removed]' || selftext === '[deleted]') return ''
-    return selftext.slice(0, 2000)
+    const res = await fetch(`https://old.reddit.com${path}`, { headers: { 'User-Agent': REDDIT_UA } })
+    return res.ok ? await res.text() : ''
   } catch { return '' }
+}
+
+// A thing's OWN body is the first `.md` block after its opening div and before its nested
+// children (comment markdown contains no <div>, so the first </div></div> closes `.md`).
+function redditBodyAt(html: string, idx: number): string {
+  const m = html.slice(idx, idx + 8000).match(/<div class="md">([\s\S]*?)<\/div>\s*<\/div>/)
+  if (!m) return ''
+  try { return turndownReddit.turndown(m[1]).trim() }
+  catch { return m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() }
+}
+
+export async function fetchRedditBody(url: string): Promise<string> {
+  const match = url.match(/reddit\.com\/r\/(\w+)\/comments\/([a-zA-Z0-9]+)/)
+  if (!match) return ''
+  const html = await fetchOldRedditHtml(`/r/${match[1]}/comments/${match[2]}/`)
+  if (!html) return ''
+  // Self/text posts carry the body in the link thing's expando `.md`; image/link posts have none.
+  const m = html.match(/<div class="expando"[\s\S]*?<div class="md">([\s\S]*?)<\/div>\s*<\/div>/)
+  if (!m) return ''
+  let text = ''
+  try { text = turndownReddit.turndown(m[1]).trim() }
+  catch { text = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() }
+  if (!text || text === '[removed]' || text === '[deleted]') return ''
+  return text.slice(0, 2000)
 }
 
 export async function fetchRedditDevComment(url: string): Promise<{ body: string; devName: string } | null> {
   const match = url.match(/reddit\.com\/r\/(\w+)\/comments\/([a-zA-Z0-9]+)\/[^/]*\/([a-zA-Z0-9]+)/)
   if (!match) return null
   const [, sub, postId, commentId] = match
-  try {
-    const res = await fetch(
-      `https://www.reddit.com/r/${sub}/comments/${postId}.json?comment=${commentId}&context=1&raw_json=1`,
-      { headers: { 'User-Agent': 'sc-feed-bot/1.0 (subliminal.gg)' } }
-    )
-    if (!res.ok) return null
-    const data = await res.json()
+  const html = await fetchOldRedditHtml(`/r/${sub}/comments/${postId}/comment/${commentId}/?context=1&limit=5`)
+  if (!html) return null
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const thread: any[] = data?.[1]?.data?.children ?? []
-    if (!thread.length) return null
+  // Comment things in document order. With ?context=1 the page renders only
+  // [parent][target][target's replies], so the thing right before the target is its direct
+  // parent — i.e. exactly what the dev replied to.
+  const re = /<div class="[^"]*\bcomment\b[^"]*"\s+id="thing_(t1_[a-z0-9]+)"[^>]*?\sdata-author="([^"]*)"/g
+  const things: { id: string; author: string; idx: number }[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html))) things.push({ id: m[1], author: m[2], idx: m.index })
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let parentData: any = null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let devData: any = null
+  const ti = things.findIndex(t => t.id === `t1_${commentId}`)
+  if (ti === -1) return null
+  const devBody = redditBodyAt(html, things[ti].idx)
+  if (!devBody) return null
+  const devName = things[ti].author || 'Dev'
 
-    const c0 = thread[0]?.data
-    if (c0?.id === commentId) {
-      devData = c0
-      const op = data?.[0]?.data?.children?.[0]?.data
-      const opText = (op?.selftext ?? '').replace(/\[removed\]|\[deleted\]/g, '').trim()
-      parentData = op ? { author: op.author, body: opText || op.title } : null
-    } else {
-      parentData = c0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const replies: any[] = c0?.replies?.data?.children ?? []
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      devData = replies.find((r: any) => r?.data?.id === commentId)?.data ?? null
-    }
+  // Parent comment, or — if the dev replied at top level — the post itself (its title).
+  let parentLabel = '', parentBody = ''
+  if (ti > 0) {
+    parentLabel = `u/${things[ti - 1].author}`
+    parentBody = redditBodyAt(html, things[ti - 1].idx)
+  } else {
+    parentLabel = 'Post'
+    parentBody = (html.match(/<a[^>]*class="title[^"]*"[^>]*>([\s\S]*?)<\/a>/)?.[1] ?? '').replace(/<[^>]+>/g, '').trim()
+  }
+  parentBody = parentBody.replace(/\[removed\]|\[deleted\]/g, '').trim().slice(0, 400)
 
-    if (!devData?.body) return null
-
-    const devName = devData.author ?? 'Dev'
-    const devBody = (devData.body as string).replace(/\[removed\]|\[deleted\]/g, '').trim()
-    const parentName = parentData?.author ?? ''
-    const parentBody = ((parentData?.body ?? '') as string).replace(/\[removed\]|\[deleted\]/g, '').trim().slice(0, 400)
-
-    const quote = parentName && parentBody ? `> **u/${parentName}:** ${parentBody}\n\n` : ''
-    return { body: `${quote}**u/${devName}:** ${devBody}`, devName }
-  } catch { return null }
+  const quote = parentLabel && parentBody ? `> **${parentLabel}:** ${parentBody}\n\n` : ''
+  return { body: `${quote}**u/${devName}:** ${devBody}`, devName }
 }
 
 // ---------- youtube ----------
