@@ -32,6 +32,7 @@
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
     "tailwindcss": "^4.1.6",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }
