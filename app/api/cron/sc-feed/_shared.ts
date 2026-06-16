@@ -337,47 +337,76 @@ export function extractSpectrumContentBlocks(
 
 // A nested Spectrum reply. The `thread/nested` endpoint returns replies as a
 // tree (each reply may carry its own `replies` array), so any search must recurse.
+// `parent_reply_reference` names the reply this one is answering: `null` means a
+// top-level reply (answering the OP directly), otherwise `{ id, label }` where
+// label is the parent author's display name.
 interface SpectrumReply {
   id?: string | number
   content_blocks?: Array<{ type: string; data: unknown }>
   member?: { displayname?: string }
   time_created?: number
+  parent_reply_reference?: { id?: string | number; label?: string } | null
   replies?: SpectrumReply[]
 }
 
-// Depth-first search for a reply by id anywhere in the nested tree.
-function findReplyById(replies: SpectrumReply[], id: string): SpectrumReply | null {
+type ReplyHit = { node: SpectrumReply; parent: SpectrumReply | null }
+
+// Depth-first search for a reply by id anywhere in the nested tree. Returns the
+// matched node along with its parent node (the reply it's nested under), or null.
+function findReplyById(replies: SpectrumReply[], id: string, parent: SpectrumReply | null = null): ReplyHit | null {
   for (const r of replies) {
-    if (String(r.id) === id) return r
-    const hit = r.replies?.length ? findReplyById(r.replies, id) : null
+    if (String(r.id) === id) return { node: r, parent }
+    const hit = r.replies?.length ? findReplyById(r.replies, id, r) : null
     if (hit) return hit
   }
   return null
 }
 
-// Latest (most recent) reply authored by a given member anywhere in the tree.
-// Used as a fallback when the exact linked reply is nested too deep to load.
-function findLatestReplyByMember(replies: SpectrumReply[], name: string): SpectrumReply | null {
+// Latest (most recent) reply authored by a given member anywhere in the tree,
+// with its parent node. Fallback for when the exact linked reply is nested too
+// deep to load.
+function findLatestReplyByMember(replies: SpectrumReply[], name: string): ReplyHit | null {
   const wanted = name.trim().toLowerCase()
-  let best: SpectrumReply | null = null
-  const walk = (rs: SpectrumReply[]) => {
+  let best: ReplyHit | null = null
+  const walk = (rs: SpectrumReply[], parent: SpectrumReply | null) => {
     for (const r of rs) {
       if ((r.member?.displayname ?? '').trim().toLowerCase() === wanted) {
-        if (!best || (r.time_created ?? 0) > (best.time_created ?? 0)) best = r
+        if (!best || (r.time_created ?? 0) > (best.node.time_created ?? 0)) best = { node: r, parent }
       }
-      if (r.replies?.length) walk(r.replies)
+      if (r.replies?.length) walk(r.replies, r)
     }
   }
-  walk(replies)
+  walk(replies, null)
   return best
 }
 
-// Render a reply's content blocks to a body string, prefixing any quoted parent
-// text as a Markdown blockquote.
-function replyToBody(reply: SpectrumReply): { body: string; image: string } {
-  const { quote, text, image } = extractSpectrumContentBlocks(reply.content_blocks ?? [])
+const PARENT_CTX_MAX = 280   // cap the "replying to" context so the dev reply stays the focus
+
+// Render a reply to a body string. When the reply is answering ANOTHER reply
+// (not the OP), prepend a Markdown blockquote naming who they replied to and what
+// that person said — otherwise the dev's answer floats with no context. Replies
+// to the OP get no prefix: the card title already carries the thread topic.
+function replyToBody(hit: ReplyHit): { body: string; image: string } {
+  const { node, parent } = hit
+  const { quote, text, image } = extractSpectrumContentBlocks(node.content_blocks ?? [])
   const parts: string[] = []
-  if (quote) parts.push(quote.split('\n').filter(l => l.trim()).map(l => `> ${l}`).join('\n'))
+
+  // Only surface context when answering ANOTHER reply (parent_reply_reference set).
+  // A null reference means a top-level reply to the OP — per the display rule we
+  // don't echo the original post; the card title already carries the thread topic.
+  const ref = node.parent_reply_reference
+  if (ref) {
+    // Prefer the parent's own text from the tree; fall back to any quote block the
+    // reply explicitly carried (used when the parent itself wasn't loaded).
+    const parentText = (parent ? extractSpectrumContentBlocks(parent.content_blocks ?? []).text : '') || quote
+    let ctx = parentText.replace(/\s+/g, ' ').trim()
+    if (ctx) {
+      if (ctx.length > PARENT_CTX_MAX) ctx = ctx.slice(0, PARENT_CTX_MAX).replace(/\s+\S*$/, '') + '…'
+      const author = (ref.label || parent?.member?.displayname || '').trim()
+      parts.push(`> ${author ? `**${author}:** ` : ''}${ctx}`)
+    }
+  }
+
   if (text) parts.push(text)
   return { body: parts.join('\n\n'), image }
 }
@@ -441,10 +470,10 @@ export async function fetchTrackerDevContent(url: string, devName = ''): Promise
     // Fallback: exact reply was nested too deep to load on either page — use the
     // named dev's most recent reply across both trees instead of a blank card.
     if (devName) {
-      let best: SpectrumReply | null = null
+      let best: ReplyHit | null = null
       for (const t of trees) {
         const cand = findLatestReplyByMember(t.replies ?? [], devName)
-        if (cand && (!best || (cand.time_created ?? 0) > (best.time_created ?? 0))) best = cand
+        if (cand && (!best || (cand.node.time_created ?? 0) > (best.node.time_created ?? 0))) best = cand
       }
       if (best) return replyToBody(best)
     }
