@@ -88,12 +88,12 @@ export const DEFAULT_PRESETS: LayoutPreset[] = [
     id: 'default-16-9-all',
     name: '16:9 All',
     isDefault: true,
-    // Sub's exported 16:9 layout (2026-06-17). twitter-rsi kept in hiddenChannels (merge-only)
-    // per the standing "no Twitter panel by default" decision — his export had it visible.
+    // Sub's exported 16:9 layout (2026-06-17). twitter-rsi is a visible panel here (per Sub);
+    // it stays hidden/merge-only in the 9:16 and Reset presets below.
     columnOrder: ['__omni_feed', '__motd_unified', 'rsi-status', 'spectrum-cig', 'sc-youtube', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'subliminalstv', 'twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
     columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'rsi-status': 'medium', 'spectrum-cig': 'medium', 'sc-youtube': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'narrow', 'sc-leaks': 'medium', 'subliminalstv': 'medium', 'twitter-rsi': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
     columnHeights: { '__omni_feed': 'full', '__motd_unified': 'quarter', 'rsi-status': 'third', 'spectrum-cig': 'third', 'sc-youtube': 'third', 'sc-news': 'half', 'patch-news': 'half', 'cig-news': 'full', 'sc-leaks': 'half', 'subliminalstv': 'half', 'twitter-rsi': 'half', 'sc-yt-creators': 'half', 'sc-twitch-creators': 'quarter', 'sc-custom-rss': 'quarter' },
-    hiddenChannels: ['__motd_unified', 'twitter-rsi'],
+    hiddenChannels: ['__motd_unified'],
   },
   {
     id: 'default-9-16-omni',
