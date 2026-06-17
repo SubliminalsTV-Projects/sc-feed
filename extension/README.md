@@ -1,37 +1,51 @@
-# SC Feed — RSI Token Sync (browser extension)
+# SC Feed Companion (browser extension)
 
-Owner tool. Reads the `Rsi-Token` session cookie from robertsspaceindustries.com (where Sub
-is logged in with the Evocati account) and pushes it to SC Feed's owner endpoint, so the
-cron's `RSI_TOKEN` refreshes itself instead of the manual DevTools copy-paste.
+Owner tool, Chrome + Firefox/Zen. Two jobs:
 
-**It only ever stores Sub's token.** The endpoint (`/api/owner/rsi-token`) is owner-gated and
-writes a single locked PocketBase row; a non-owner can't push, and no per-user RSI cookies
-are ever collected.
+1. **RSI token sync** — reads the HttpOnly `Rsi-Token` cookie from robertsspaceindustries.com
+   (where Sub is logged in as the Evocati account) and pushes it to SC Feed's owner endpoint,
+   so the cron's `RSI_TOKEN` refreshes itself instead of the manual DevTools copy-paste.
+   It only ever stores Sub's token — the endpoint is owner-gated and writes one locked PB row.
+2. **Feed awareness** — polls `/api/sc-feed` every 5 min, shows the unread count on the toolbar
+   badge, and fires a desktop notification when new items land (even with SC Feed closed). The
+   popup shows the latest items, an **Open SC Feed** button, and a **Capture window** button
+   (clean 1280×720 popup for stream window-capture).
 
 ## Files
 - `manifest.json` — Chrome / Edge (MV3, `background.service_worker`)
 - `manifest.firefox.json` — Firefox / Zen (MV3, `background.scripts` + gecko id)
-- `background.js`, `popup.html`, `popup.js` — shared, browser-agnostic
+- `background.js`, `popup.html`, `popup.js` — shared
+- `build-firefox.sh` — assembles `dist-firefox/` (Firefox manifest as `manifest.json`) for signing
 
-## Configure (popup)
-- **Endpoint**: defaults to `https://sc-feed.subliminal.gg/api/owner/rsi-token`
-- **Push secret**: paste `OWNER_PUSH_SECRET` (the headless fallback). Leave blank if you're
-  signed into SC Feed as owner in the same browser — the push rides your session cookie.
+## Configure (popup → Settings)
+- **SC Feed URL** — default `https://sc-feed.subliminal.gg`
+- **Token push endpoint** — default `…/api/owner/rsi-token`
+- **Push secret** — `OWNER_PUSH_SECRET` (from Bitwarden: `bw-lookup --raw "API - SCFeed Owner Push Secret"`)
+- **Desktop notifications** — on/off
 
 ## Install — Chrome / Edge
-1. `chrome://extensions` → enable Developer mode → **Load unpacked** → select this folder.
+`chrome://extensions` → Developer mode → **Load unpacked** → select this folder.
 
-## Install — Firefox / Zen
-Firefox requires signing for a *permanent* install.
-- **Quick test (temporary):** `about:debugging` → This Firefox → **Load Temporary Add-on**
-  → pick `manifest.firefox.json`. Rename it to `manifest.json` first (Firefox loads the file
-  named `manifest.json`), or copy this folder and swap the manifest. Resets on restart.
-- **Permanent:** sign as an **unlisted** add-on on addons.mozilla.org (free), then install
-  the signed `.xpi`. Use `manifest.firefox.json` as the manifest in the packaged zip.
+## Install — Firefox / Zen (permanent, signed)
+Firefox/Zen require a signed add-on for permanent install. Sign it **unlisted** on AMO (free):
 
-> One folder, two manifests: when packaging, use the right manifest as `manifest.json`.
-> (A tiny `build.sh` could automate this later; kept manual for now.)
+```bash
+git clone https://github.com/SubliminalsTV-Projects/sc-feed.git
+cd sc-feed/extension
+./build-firefox.sh                      # → dist-firefox/
+npm install -g web-ext                  # one-time
+# Get API creds at https://addons.mozilla.org/developers/addon/api/key/
+web-ext sign --source-dir=dist-firefox --channel=unlisted \
+  --api-key=<ISSUER> --api-secret=<SECRET>
+```
+
+`web-ext sign` outputs a signed `.xpi` under `web-ext-artifacts/`. In Zen: `about:addons` →
+gear icon → **Install Add-on From File…** → pick the `.xpi`. Permanent, survives restarts.
+
+(Quick test without signing: `about:debugging` → This Firefox → **Load Temporary Add-on** →
+pick `dist-firefox/manifest.json`. Resets on restart.)
 
 ## Verify
-Open the popup → **Push now**. Status should read `✓ token synced`. Then the SC Feed owner
-endpoint `GET /api/owner/rsi-token` will report `{ set: true, updated_via: "extension" }`.
+Popup → **Push token now** → status reads `✓ token synced`. The owner backend at
+`/owner` shows `{ set: true, updated_via: "extension" }`. New feed items raise the toolbar
+badge + a notification.

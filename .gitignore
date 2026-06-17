@@ -8,3 +8,7 @@ out/
 next-env.d.ts
 .vercel
 .DS_Store
+
+# extension build artifacts
+extension/dist-firefox/
+extension/web-ext-artifacts/

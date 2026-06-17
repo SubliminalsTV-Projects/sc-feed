@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "SC Feed — RSI Token Sync",
-  "version": "0.1.0",
-  "description": "Pushes the RSI Rsi-Token session cookie to SC Feed so Spectrum/MOTD never go stale. Owner tool.",
-  "permissions": ["cookies", "storage", "alarms"],
+  "name": "SC Feed Companion",
+  "version": "0.2.0",
+  "description": "RSI token sync + new-item badge/notifications for SC Feed. Owner tool.",
+  "permissions": ["cookies", "storage", "alarms", "notifications"],
   "host_permissions": [
     "https://robertsspaceindustries.com/*",
     "https://*.robertsspaceindustries.com/*",
     "https://sc-feed.subliminal.gg/*"
   ],
   "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "SC Feed RSI Token Sync" }
+  "action": { "default_popup": "popup.html", "default_title": "SC Feed Companion" }
 }
