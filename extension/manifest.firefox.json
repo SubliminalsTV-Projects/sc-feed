@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SC Feed Companion",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "RSI token sync + new-item badge/notifications for SC Feed. Owner tool.",
   "permissions": ["cookies", "storage", "alarms", "notifications"],
   "host_permissions": [

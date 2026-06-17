@@ -30,15 +30,41 @@ async function getConfig() {
 
 // ---------- RSI token sync ----------
 
+// Search EVERY cookie store (Zen/Firefox containers + workspaces each have their own store,
+// and the RSI login often lives in one of those, not the default). Match the name
+// case-insensitively. Stash what we saw so a miss can report a useful diagnostic.
+let lastScan = { stores: 0, names: [] }
 async function readCookie() {
-  const c = await api.cookies.get({ url: RSI_URL, name: COOKIE })
-  return c?.value || ''
+  let stores = [{ id: undefined }]
+  try { const s = await api.cookies.getAllCookieStores(); if (s && s.length) stores = s } catch { /* fall back to default */ }
+  const names = new Set()
+  for (const st of stores) {
+    const opts = { domain: 'robertsspaceindustries.com' }
+    if (st.id) opts.storeId = st.id
+    let cs = []
+    try { cs = await api.cookies.getAll(opts) } catch { /* store unreadable */ }
+    for (const c of cs) {
+      names.add(c.name)
+      if (c.name.toLowerCase() === COOKIE.toLowerCase() && c.value) {
+        lastScan = { stores: stores.length, names: [...names] }
+        return c.value
+      }
+    }
+  }
+  lastScan = { stores: stores.length, names: [...names] }
+  return ''
 }
 
 async function pushToken(reason) {
   const token = await readCookie()
   const stamp = at => ({ at, reason })
-  if (!token) { await api.storage.local.set({ lastStatus: { ok: false, msg: 'no Rsi-Token cookie (log into RSI?)', ...stamp(now()) } }); return }
+  if (!token) {
+    const msg = lastScan.names.length
+      ? `Rsi-Token not found — saw: ${lastScan.names.slice(0, 8).join(', ')}`
+      : `no RSI cookies visible across ${lastScan.stores} store(s) — grant host access + log into RSI`
+    await api.storage.local.set({ lastStatus: { ok: false, msg, ...stamp(now()) } })
+    return
+  }
   const { endpoint, secret } = await getConfig()
   try {
     const res = await fetch(endpoint, {
