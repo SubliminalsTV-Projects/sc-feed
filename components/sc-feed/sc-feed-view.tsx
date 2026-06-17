@@ -1252,6 +1252,11 @@ export function ScFeedView() {
           <div className="md:hidden fixed inset-0 z-30 bg-black/50" onClick={() => setSettingsOpen(false)} />
         )}
 
+        {/* Desktop settings: pushes content from the LEFT */}
+        <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-r border-outline-variant/30 ${settingsOpen ? 'w-72' : 'w-0 border-0'}`}>
+          <SettingsPanel {...settingsPanelProps} />
+        </div>
+
         {/* Content — clicking here closes any open settings panel */}
         <div className="flex-1 min-h-0 overflow-hidden" onClick={() => { if (settingsOpen) setSettingsOpen(false) }}>
           {loading ? (
@@ -1300,14 +1305,9 @@ export function ScFeedView() {
           )}
         </div>
 
-        {/* Desktop settings: pushes content from right */}
-        <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-l border-outline-variant/30 ${settingsOpen ? 'w-72' : 'w-0 border-0'}`}>
-          <SettingsPanel {...settingsPanelProps} />
-        </div>
-
-        {/* Mobile settings: fixed overlay from right */}
+        {/* Mobile settings: fixed overlay from left */}
         {settingsOpen && (
-          <div className="md:hidden fixed right-0 top-0 h-full z-40 w-72 overflow-hidden border-l border-outline-variant/30 bg-surface-container">
+          <div className="md:hidden fixed left-0 top-0 h-full z-40 w-72 overflow-hidden border-r border-outline-variant/30 bg-surface-container">
             <SettingsPanel {...settingsPanelProps} />
           </div>
         )}
@@ -1351,9 +1351,7 @@ export function ScFeedView() {
         </>
       )}
       {globalSearch && !searchOpen && (
-        <div className={`fixed bottom-24 right-6 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-primary-container/40 shadow-lg max-w-[220px] transition-transform duration-200 ease-in-out ${
-          settingsOpen ? 'md:-translate-x-72' : ''
-        }`}>
+        <div className="fixed bottom-24 right-6 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-primary-container/40 shadow-lg max-w-[220px]">
           <Search className="w-3 h-3 text-primary-container/60 shrink-0" />
           <span className="text-[11px] font-label font-black text-on-surface truncate">{globalSearch}</span>
           <button onClick={() => setGlobalSearch('')} className="shrink-0 p-0.5 rounded-full hover:bg-surface-container transition-colors">
@@ -1363,9 +1361,7 @@ export function ScFeedView() {
       )}
       <button
         onClick={() => setSearchOpen(o => !o)}
-        className={`fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg text-on-primary-container ${globalSearch && !searchOpen ? 'bg-primary-container ring-2 ring-primary-container/60 ring-offset-2 ring-offset-surface' : 'bg-primary-container hover:brightness-110'} ${
-          settingsOpen ? 'md:-translate-x-72' : ''
-        }`}
+        className={`fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg text-on-primary-container ${globalSearch && !searchOpen ? 'bg-primary-container ring-2 ring-primary-container/60 ring-offset-2 ring-offset-surface' : 'bg-primary-container hover:brightness-110'}`}
       >
         {searchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
       </button>
@@ -1376,7 +1372,7 @@ export function ScFeedView() {
         open={notificationsOpen}
         onToggleOpen={() => setNotificationsOpen(o => !o)}
         onForceOpen={() => setNotificationsOpen(true)}
-        slideClass={settingsOpen ? 'md:-translate-x-72' : ''}
+        slideClass=""
       />
 
       {/* SC Community FAB — top of the FAB stack, links out to RSI */}
@@ -1385,9 +1381,7 @@ export function ScFeedView() {
         target="_blank"
         rel="noopener noreferrer"
         title="Made by the Community — robertsspaceindustries.com"
-        className={`fixed bottom-[10.5rem] right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface-container-high border border-outline-variant/40 hover:brightness-110 transition-all duration-200 ease-in-out ${
-          settingsOpen ? 'md:-translate-x-72' : ''
-        }`}
+        className="fixed bottom-[10.5rem] right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface-container-high border border-outline-variant/40 hover:brightness-110"
       >
         <img
           src={theme === 'light' ? '/logos/MadeByTheCommunity_Black.png' : '/logos/MadeByTheCommunity_White.png'}
