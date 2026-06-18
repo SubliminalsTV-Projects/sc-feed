@@ -18,6 +18,7 @@ export const OMNI_FEED_ID = '__omni_feed'
 export const YT_CREATORS_ID     = 'sc-yt-creators'
 export const TWITCH_CREATORS_ID = 'sc-twitch-creators'
 export const CUSTOM_RSS_ID      = 'sc-custom-rss'
+export const SAVED_ID           = 'sc-saved'
 
 export const MAX_YT_CHANNELS     = 5
 export const MAX_TWITCH_STREAMERS = 3
@@ -33,6 +34,16 @@ export interface UserRSSFeed { url: string; label: string }
 
 export const FeedPrefsContext = createContext<{ dateFormat: 'short' | 'long'; hideAllRead: boolean }>({ dateFormat: 'short', hideAllRead: false })
 export function useFeedPrefs() { return useContext(FeedPrefsContext) }
+
+// In-page "Save to SC Feed" actions, provided by ScFeedView once auth state + the saved set
+// are known. `canSave` is false for anonymous visitors (so cards hide the button); `isSaved`
+// is keyed on the message URL; `toggleSave` adds/removes via /api/sc-feed/save.
+export const SaveActionsContext = createContext<{
+  canSave: boolean
+  isSaved: (url?: string) => boolean
+  toggleSave: (msg: { title: string; url?: string }) => void
+}>({ canSave: false, isSaved: () => false, toggleSave: () => {} })
+export function useSaveActions() { return useContext(SaveActionsContext) }
 
 export const COLUMN_WIDTHS = { narrow: 340, medium: 420, wide: 560 } as const
 export type ColumnWidth = keyof typeof COLUMN_WIDTHS
@@ -90,28 +101,28 @@ export const DEFAULT_PRESETS: LayoutPreset[] = [
     isDefault: true,
     // Sub's exported 16:9 layout (2026-06-17). twitter-rsi is a visible panel here (per Sub);
     // it stays hidden/merge-only in the 9:16 and Reset presets below.
-    columnOrder: ['__omni_feed', '__motd_unified', 'rsi-status', 'spectrum-cig', 'sc-youtube', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'subliminalstv', 'twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
-    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'rsi-status': 'medium', 'spectrum-cig': 'medium', 'sc-youtube': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'narrow', 'sc-leaks': 'medium', 'subliminalstv': 'medium', 'twitter-rsi': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
-    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'quarter', 'rsi-status': 'third', 'spectrum-cig': 'third', 'sc-youtube': 'third', 'sc-news': 'half', 'patch-news': 'half', 'cig-news': 'full', 'sc-leaks': 'half', 'subliminalstv': 'half', 'twitter-rsi': 'half', 'sc-yt-creators': 'half', 'sc-twitch-creators': 'quarter', 'sc-custom-rss': 'quarter' },
-    hiddenChannels: ['__motd_unified'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'rsi-status', 'spectrum-cig', 'sc-youtube', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'subliminalstv', 'twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss', 'sc-saved'],
+    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'rsi-status': 'medium', 'spectrum-cig': 'medium', 'sc-youtube': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'narrow', 'sc-leaks': 'medium', 'subliminalstv': 'medium', 'twitter-rsi': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium', 'sc-saved': 'medium' },
+    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'quarter', 'rsi-status': 'third', 'spectrum-cig': 'third', 'sc-youtube': 'third', 'sc-news': 'half', 'patch-news': 'half', 'cig-news': 'full', 'sc-leaks': 'half', 'subliminalstv': 'half', 'twitter-rsi': 'half', 'sc-yt-creators': 'half', 'sc-twitch-creators': 'quarter', 'sc-custom-rss': 'quarter', 'sc-saved': 'half' },
+    hiddenChannels: ['__motd_unified', 'sc-saved'],
   },
   {
     id: 'default-9-16-omni',
     name: '9:16 OmniFeed',
     isDefault: true,
-    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss', 'sc-saved'],
     columnWidths: { '__omni_feed': 'wide' },
     columnHeights: { '__omni_feed': 'full' },
-    hiddenChannels: ['__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    hiddenChannels: ['__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss', 'sc-saved'],
   },
   {
     id: 'default-reset',
     name: 'Reset',
     isDefault: true,
-    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
-    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'spectrum-cig': 'medium', 'twitter-rsi': 'medium', 'rsi-status': 'medium', 'sc-youtube': 'medium', 'subliminalstv': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'medium', 'sc-leaks': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium' },
-    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'full', 'spectrum-cig': 'full', 'twitter-rsi': 'full', 'rsi-status': 'full', 'sc-youtube': 'full', 'subliminalstv': 'full', 'sc-news': 'full', 'patch-news': 'full', 'cig-news': 'full', 'sc-leaks': 'full', 'sc-yt-creators': 'full', 'sc-twitch-creators': 'full', 'sc-custom-rss': 'full' },
-    hiddenChannels: ['twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss'],
+    columnOrder: ['__omni_feed', '__motd_unified', 'spectrum-cig', 'twitter-rsi', 'rsi-status', 'sc-youtube', 'subliminalstv', 'sc-news', 'patch-news', 'cig-news', 'sc-leaks', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss', 'sc-saved'],
+    columnWidths: { '__omni_feed': 'medium', '__motd_unified': 'medium', 'spectrum-cig': 'medium', 'twitter-rsi': 'medium', 'rsi-status': 'medium', 'sc-youtube': 'medium', 'subliminalstv': 'medium', 'sc-news': 'medium', 'patch-news': 'medium', 'cig-news': 'medium', 'sc-leaks': 'medium', 'sc-yt-creators': 'medium', 'sc-twitch-creators': 'medium', 'sc-custom-rss': 'medium', 'sc-saved': 'medium' },
+    columnHeights: { '__omni_feed': 'full', '__motd_unified': 'full', 'spectrum-cig': 'full', 'twitter-rsi': 'full', 'rsi-status': 'full', 'sc-youtube': 'full', 'subliminalstv': 'full', 'sc-news': 'full', 'patch-news': 'full', 'cig-news': 'full', 'sc-leaks': 'full', 'sc-yt-creators': 'full', 'sc-twitch-creators': 'full', 'sc-custom-rss': 'full', 'sc-saved': 'full' },
+    hiddenChannels: ['twitter-rsi', 'sc-yt-creators', 'sc-twitch-creators', 'sc-custom-rss', 'sc-saved'],
   },
 ]
 
@@ -146,4 +157,5 @@ export const FEED_DESCRIPTIONS: Record<string, string> = {
   'sc-yt-creators':     'YouTube channels you follow — add up to 5 SC creators in Settings. Stored in your browser only, never on the server.',
   'sc-twitch-creators': 'Twitch streamers you follow — add up to 3 streamers in Settings. Cards appear here when they go live. Stored in your browser only.',
   'sc-custom-rss':      'Any RSS or Atom feed you want — add up to 5 in Settings (Reddit, blogs, news sites). Stored in your browser only.',
+  'sc-saved':           'Your saved pages — bookmark any card with the save button, or right-click any RSI/Reddit/YouTube page with the SC Feed Companion extension. Synced to your account; sign in to use.',
 }

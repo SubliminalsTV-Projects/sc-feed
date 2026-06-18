@@ -7,7 +7,7 @@ import {
   Eye, EyeOff, MoreHorizontal, RotateCcw, Rss, Sparkles, X,
 } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
-import { ALL_TRACKER_KEYS, CUSTOM_RSS_ID, FEED_DESCRIPTIONS, LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_LOBBY_URLS, PILL, TRACKER_CATS, TWITCH_CREATORS_ID, YT_CREATORS_ID, useFeedPrefs, type ColumnHeight, type ColumnWidth } from './sc-feed-types'
+import { ALL_TRACKER_KEYS, CUSTOM_RSS_ID, FEED_DESCRIPTIONS, LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_LOBBY_URLS, PILL, SAVED_ID, TRACKER_CATS, TWITCH_CREATORS_ID, YT_CREATORS_ID, useFeedPrefs, type ColumnHeight, type ColumnWidth } from './sc-feed-types'
 import { formatLocalTime, getTrackerCatKey, groupByWindow, timeAgo } from './sc-feed-utils'
 import { GroupedCard, MessageCard } from './sc-feed-message-card'
 import { RsiStatusCard } from './sc-feed-notifications'
@@ -667,7 +667,8 @@ export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
     touchStartX.current = null
   }
 
-  const omniSources = channels.filter(c => !MOTD_CHANNEL_IDS.has(c.id))
+  // Exclude MOTD (its own carousel) and the personal Saved list (a bookmark column, not news).
+  const omniSources = channels.filter(c => !MOTD_CHANNEL_IDS.has(c.id) && c.id !== SAVED_ID)
 
   const allMessages = omniSources
     .filter(c => omniSourceToggles[c.id] !== false)

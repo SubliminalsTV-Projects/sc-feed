@@ -6,9 +6,9 @@ import dynamic from 'next/dynamic'
 import remarkGfm from 'remark-gfm'
 
 const ReactMarkdown = dynamic(() => import('react-markdown'), { ssr: false, loading: () => null })
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Expand, ExternalLink, Film, Music, Sparkles, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Expand, ExternalLink, Film, Music, Sparkles, X } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
-import { PILL, PIPELINE_CHANNEL_IDS, TRACKER_CATS, useFeedPrefs } from './sc-feed-types'
+import { PILL, PIPELINE_CHANNEL_IDS, TRACKER_CATS, useFeedPrefs, useSaveActions } from './sc-feed-types'
 import { formatLocalTime, getSourceInfo, getTrackerCatKey, isKbMessage, normalizeBodyMarkdown, stripDiscordMarkdown, timeAgo } from './sc-feed-utils'
 import { KbCard } from './sc-feed-kb-card'
 import { MessageModal } from './sc-feed-message-modal'
@@ -81,6 +81,26 @@ export function PillsRow({ pills, className = '' }: {
   )
 }
 
+// In-page "Save to SC Feed" toggle for a card footer. Renders nothing for anonymous visitors
+// or cards without a URL. Filled amber when the URL is already in the user's Saved list.
+export function SaveButton({ msg }: { msg: FeedMessage }) {
+  const { canSave, isSaved, toggleSave } = useSaveActions()
+  if (!canSave || !msg.url) return null
+  const saved = isSaved(msg.url)
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); toggleSave({ title: msg.title, url: msg.url }) }}
+      title={saved ? 'Remove from Saved' : 'Save to SC Feed'}
+      className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center border transition-all duration-200 ${saved
+        ? 'border-amber-400/60 text-amber-400'
+        : 'border-outline-variant/30 text-on-surface-variant/30 hover:border-amber-400/50 hover:text-amber-400/70'
+      }`}
+    >
+      {saved ? <BookmarkCheck className="w-2.5 h-2.5" /> : <Bookmark className="w-2.5 h-2.5" />}
+    </button>
+  )
+}
+
 export function CompactRow({ msg, blurred, channelId, lastSeen, isRead, onMarkRead, hidePills }: {
   msg: FeedMessage; blurred: boolean; channelId: string; lastSeen?: string | null
   isRead?: boolean; onMarkRead?: () => void; hidePills?: boolean
@@ -108,20 +128,23 @@ export function CompactRow({ msg, blurred, channelId, lastSeen, isRead, onMarkRe
         } ${blurred ? 'blur-sm select-none' : ''} ${isRead ? 'opacity-50 hover:opacity-100' : ''}`}
     >
       {readerOpen && <MessageModal msg={msg} channelId={channelId} onClose={() => setReaderOpen(false)} />}
-      {onMarkRead ? (
-        <button
-          onClick={e => { e.stopPropagation(); onMarkRead() }}
-          title={isRead ? 'Mark as unread' : 'Mark as read'}
-          className={`absolute top-2 right-2 z-10 w-4 h-4 rounded-full flex items-center justify-center border transition-all duration-200 ${isRead
-            ? 'border-primary-container/60 text-primary-container'
-            : 'border-outline-variant/30 text-transparent hover:border-primary-container/50 hover:text-primary-container/50'
-          }`}
-        >
-          <Check className="w-2 h-2" />
-        </button>
-      ) : (
-        isNew && <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-primary-container shrink-0" />
-      )}
+      <div className="absolute top-2 right-2 z-10 flex flex-col items-center gap-1">
+        <SaveButton msg={msg} />
+        {onMarkRead ? (
+          <button
+            onClick={e => { e.stopPropagation(); onMarkRead() }}
+            title={isRead ? 'Mark as unread' : 'Mark as read'}
+            className={`w-4 h-4 rounded-full flex items-center justify-center border transition-all duration-200 ${isRead
+              ? 'border-primary-container/60 text-primary-container'
+              : 'border-outline-variant/30 text-transparent hover:border-primary-container/50 hover:text-primary-container/50'
+            }`}
+          >
+            <Check className="w-2 h-2" />
+          </button>
+        ) : (
+          isNew && <span className="w-1.5 h-1.5 rounded-full bg-primary-container shrink-0" />
+        )}
+      </div>
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-headline font-black text-on-surface leading-snug">{cleanTitle}</p>
         {!hidePills && (() => {
@@ -192,6 +215,7 @@ export function GroupedCard({ messages, blurred, channelId, lastSeen, isReadMsg,
       <div className="px-2.5 py-1.5 border-t border-outline-variant/25 flex items-center gap-1.5 bg-surface-container/30">
         <PillsRow pills={footerPills} className="flex-1 min-w-0" />
         <span className="shrink-0 text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/40 whitespace-nowrap">{messages.length} posts · {timeLabel}</span>
+        <SaveButton msg={newest} />
         {onMarkRead && (
           <button
             onClick={toggleGroupRead}
@@ -608,6 +632,7 @@ function GenericMessageCard({ msg, blurred, channelId, lastSeen, motdLabels, isR
         >
           {timeLabel}
         </span>
+        <SaveButton msg={msg} />
         {onMarkRead ? (
           <button
             onClick={e => { e.stopPropagation(); onMarkRead() }}

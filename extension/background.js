@@ -79,6 +79,56 @@ async function pushToken(reason) {
   }
 }
 
+// ---------- "Send to SC Feed" (right-click → save) ----------
+
+const SAVE_MENU_ID = 'scfeed-save'
+
+// Fires on link, page, and selection contexts. Recreate (removeAll first) on install/startup
+// so re-installs don't throw "duplicate id".
+function setupContextMenus() {
+  if (!api.contextMenus) return
+  api.contextMenus.removeAll(() => {
+    api.contextMenus.create({
+      id: SAVE_MENU_ID,
+      title: 'Send to SC Feed',
+      contexts: ['page', 'link', 'selection'],
+    })
+  })
+}
+
+async function saveToFeed(info, tab) {
+  const { feedUrl, secret, notify } = await getConfig()
+  // Link context → save the link target; otherwise the page. Title prefers a text selection,
+  // then the page title, falling back to the URL (the backend also defaults title→url).
+  const url = info.linkUrl || info.pageUrl || tab?.url || ''
+  let title = (info.selectionText || tab?.title || '').trim().slice(0, 300)
+  if (!url) return
+  if (!title) title = url
+  try {
+    const res = await fetch(`${feedUrl}/api/sc-feed/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+      body: JSON.stringify({ url, title }),
+    })
+    await api.storage.local.set({ lastSave: { ok: res.ok, msg: res.ok ? 'saved' : `endpoint ${res.status}`, at: now(), title } })
+    if (notify) api.notifications?.create?.(`scfeed-save-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: `${feedUrl}/icons/icon-512.png`,
+      title: res.ok ? 'Saved to SC Feed' : `Save failed (${res.status})`,
+      message: title,
+    })
+  } catch (e) {
+    await api.storage.local.set({ lastSave: { ok: false, msg: String(e), at: now(), title } })
+    if (notify) api.notifications?.create?.(`scfeed-save-${Date.now()}`, {
+      type: 'basic', iconUrl: `${feedUrl}/icons/icon-512.png`, title: 'Save failed', message: String(e),
+    })
+  }
+}
+
+api.contextMenus?.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === SAVE_MENU_ID) saveToFeed(info, tab)
+})
+
 // ---------- feed awareness (badge + notifications + popup data) ----------
 
 function now() { return new Date().toISOString() }
@@ -162,6 +212,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'mark-seen') { markSeen().then(() => sendResponse({ done: true })); return true }
 })
 
-// Prime on install/startup so the badge + popup have data immediately.
-api.runtime.onInstalled?.addListener?.(() => pollFeed('seed'))
-api.runtime.onStartup?.addListener?.(() => pollFeed('seed'))
+// Prime on install/startup so the badge + popup have data immediately, and (re)create the
+// right-click "Send to SC Feed" menu.
+api.runtime.onInstalled?.addListener?.(() => { pollFeed('seed'); setupContextMenus() })
+api.runtime.onStartup?.addListener?.(() => { pollFeed('seed'); setupContextMenus() })

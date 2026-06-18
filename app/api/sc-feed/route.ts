@@ -79,6 +79,8 @@ const CHANNEL_ORDER = [
   { id: 'sc-yt-creators',        label: 'SC YT Creators',        channel_id: 'sc-yt-creators'       },
   { id: 'sc-twitch-creators',    label: 'SC Twitch Creators',    channel_id: 'sc-twitch-creators'   },
   { id: 'sc-custom-rss',         label: 'Custom RSS',            channel_id: 'sc-custom-rss'        },
+  // Per-user saved bookmarks (data lives in sc_feed_saved, filled client-side per signed-in user)
+  { id: 'sc-saved',              label: 'Saved',                 channel_id: 'sc-saved'             },
   // Spectrum MOTDs — at end so news columns appear first
   { id: 'sc-motd',               label: 'SC MOTD',               channel_id: 'motd-sc'              },
   { id: 'evo-motd',              label: 'Evo MOTD',              channel_id: 'motd-evo'             },

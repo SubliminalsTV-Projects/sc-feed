@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, BookOpen, ChevronDown, ChevronUp, FileDiff } from 'lucide-react'
+import { ArrowUpRight, Bookmark, BookmarkCheck, BookOpen, ChevronDown, ChevronUp, FileDiff } from 'lucide-react'
 import type { FeedMessage } from '@/app/api/sc-feed/route'
 import { KbDiffModal } from './sc-feed-kb-diff-modal'
+import { useSaveActions } from './sc-feed-types'
 import { timeAgo } from './sc-feed-utils'
 
 /**
@@ -13,6 +14,26 @@ import { timeAgo } from './sc-feed-utils'
  * first-class element here: an inline preview of the change + a "View full diff" action,
  * never a truncatable footer pill.
  */
+// Save toggle for the KB card header (ml-auto pushes it to the right). Uses useSaveActions
+// directly rather than importing message-card's SaveButton (that would be a circular import).
+function KbSaveButton({ msg }: { msg: FeedMessage }) {
+  const { canSave, isSaved, toggleSave } = useSaveActions()
+  if (!canSave || !msg.url) return null
+  const saved = isSaved(msg.url)
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); toggleSave({ title: msg.title, url: msg.url }) }}
+      title={saved ? 'Remove from Saved' : 'Save to SC Feed'}
+      className={`ml-auto shrink-0 w-5 h-5 rounded-full flex items-center justify-center border transition-all duration-200 ${saved
+        ? 'border-amber-400/60 text-amber-400'
+        : 'border-outline-variant/30 text-on-surface-variant/30 hover:border-amber-400/50 hover:text-amber-400/70'
+      }`}
+    >
+      {saved ? <BookmarkCheck className="w-2.5 h-2.5" /> : <Bookmark className="w-2.5 h-2.5" />}
+    </button>
+  )
+}
+
 export function KbCard({ msg, isRead, onMarkRead }: {
   msg: FeedMessage
   channelId?: string
@@ -64,6 +85,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
           <span className="text-[10px] font-label text-on-surface-variant/45 truncate">
             Tracker SC{msg.ts_raw ? ` · ${timeAgo(msg.ts_raw)}` : ''}
           </span>
+          <KbSaveButton msg={msg} />
         </div>
 
         <button onClick={openDiff} className="group block w-full text-left cursor-pointer">

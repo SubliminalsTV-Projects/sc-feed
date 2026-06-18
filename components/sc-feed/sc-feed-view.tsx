@@ -23,9 +23,9 @@ import { useSession, signOut } from 'next-auth/react'
 import { Download, Loader2, LogIn, LogOut, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
 import {
-  COLUMN_WIDTHS, DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext,
+  COLUMN_WIDTHS, DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext, SaveActionsContext,
   LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_UNIFIED_ID, OMNI_FEED_ID, REFRESH_INTERVAL_MS,
-  YT_CREATORS_ID, TWITCH_CREATORS_ID, CUSTOM_RSS_ID,
+  YT_CREATORS_ID, TWITCH_CREATORS_ID, CUSTOM_RSS_ID, SAVED_ID,
   USER_YT_KEY, USER_TWITCH_KEY, USER_RSS_KEY,
   MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS,
   type ColumnHeight, type ColumnWidth, type LayoutPreset,
@@ -145,6 +145,9 @@ export function ScFeedView() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const colRefs = useRef<Map<string, HTMLElement>>(new Map())
   const channelsRef = useRef<FeedChannel[]>([])
+  // Per-user Saved bookmarks: URLs the signed-in user has saved, for the card save toggle.
+  const [savedUrls, setSavedUrls] = useState<Set<string>>(new Set())
+  const savedUrlsRef = useRef<Set<string>>(new Set())
   const installPromptRef = useRef<BeforeInstallPromptEvent | null>(null)
   const [showInstallBtn, setShowInstallBtn] = useState(false)
   const [pushSupported, setPushSupported] = useState(false)
@@ -564,6 +567,7 @@ export function ScFeedView() {
       'sc-yt-creators',
       'sc-twitch-creators',
       'sc-custom-rss',
+      'sc-saved',
     ]
     const hasMOTD = channels.some(c => MOTD_CHANNEL_IDS.has(c.id))
     const available = new Set([
@@ -718,7 +722,7 @@ export function ScFeedView() {
       } catch { return [] }
     }
 
-    const [ytResults, twResult, rsResults] = await Promise.all([
+    const [ytResults, twResult, rsResults, savedMsgs] = await Promise.all([
       Promise.all(yt.slice(0, MAX_YT_CHANNELS).map(c =>
         safeFetch(`/api/sc-feed/youtube-proxy?id=${encodeURIComponent(c.channelId)}&name=${encodeURIComponent(c.name)}`)
       )),
@@ -728,15 +732,23 @@ export function ScFeedView() {
       Promise.all(rs.slice(0, MAX_RSS_FEEDS).map(f =>
         safeFetch(`/api/sc-feed/rss-proxy?url=${encodeURIComponent(f.url)}&label=${encodeURIComponent(f.label)}`)
       )),
+      // Per-user saved bookmarks — empty for anonymous visitors (the endpoint returns []).
+      safeFetch('/api/sc-feed/saved'),
     ])
 
     const ytMsgs = ytResults.flat().sort((a, b) => (b.ts_raw ?? '').localeCompare(a.ts_raw ?? '')).slice(0, 25)
     const rsMsgs = rsResults.flat().sort((a, b) => (b.ts_raw ?? '').localeCompare(a.ts_raw ?? '')).slice(0, 25)
 
+    // Track which URLs are saved so cards can show the bookmark as filled/active.
+    const nextSaved = new Set(savedMsgs.map(m => m.url).filter(Boolean))
+    savedUrlsRef.current = nextSaved
+    setSavedUrls(nextSaved)
+
     return channels.map(ch => {
       if (ch.id === YT_CREATORS_ID)     return { ...ch, messages: ytMsgs, updated_at: ytMsgs[0]?.ts_raw ?? null }
       if (ch.id === TWITCH_CREATORS_ID) return { ...ch, messages: twResult, updated_at: twResult[0]?.ts_raw ?? null }
       if (ch.id === CUSTOM_RSS_ID)      return { ...ch, messages: rsMsgs, updated_at: rsMsgs[0]?.ts_raw ?? null }
+      if (ch.id === SAVED_ID)           return { ...ch, messages: savedMsgs, updated_at: savedMsgs[0]?.ts_raw ?? null }
       return ch
     })
   }, [])
@@ -994,6 +1006,36 @@ export function ScFeedView() {
     })
   }, [])
 
+  // Toggle a card into / out of the per-user Saved list. Optimistic, reverts on failure;
+  // refetches so the Saved column reflects the change. Reveals the Saved column on first save.
+  const toggleSave = useCallback((msg: { title: string; url?: string }) => {
+    const url = msg.url
+    if (!url) return
+    const wasSaved = savedUrlsRef.current.has(url)
+    const apply = (saved: boolean) => {
+      const next = new Set(savedUrlsRef.current)
+      if (saved) next.add(url); else next.delete(url)
+      savedUrlsRef.current = next
+      setSavedUrls(next)
+    }
+    apply(!wasSaved)
+    if (!wasSaved) ensureChannelVisible(SAVED_ID)
+    ;(async () => {
+      try {
+        const res = wasSaved
+          ? await fetch(`/api/sc-feed/save?url=${encodeURIComponent(url)}`, { method: 'DELETE' })
+          : await fetch('/api/sc-feed/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, title: msg.title }) })
+        if (!res.ok) throw new Error(String(res.status))
+        fetchFeed(true)
+      } catch {
+        apply(wasSaved) // revert
+      }
+    })()
+  }, [ensureChannelVisible, fetchFeed])
+
+  const canSave = authStatus === 'authenticated'
+  const isSaved = useCallback((url?: string) => !!url && savedUrls.has(url), [savedUrls])
+
   const handleAddYT = useCallback(async (input: string): Promise<string | null> => {
     if (userYTRef.current.length >= MAX_YT_CHANNELS) return `Max ${MAX_YT_CHANNELS} channels`
     try {
@@ -1099,6 +1141,7 @@ export function ScFeedView() {
 
   return (
     <FeedPrefsContext.Provider value={{ dateFormat, hideAllRead }}>
+    <SaveActionsContext.Provider value={{ canSave, isSaved, toggleSave }}>
     <div className="flex flex-col hero-gradient flex-1 min-h-0">
 
       {/* Header — three-zone layout: hamburger LEFT · logo CENTER · github RIGHT */}
@@ -1394,6 +1437,7 @@ export function ScFeedView() {
 
       <PatchNotesModal open={patchNotesOpen} onClose={closePatchNotes} theme={theme} />
 
+    </SaveActionsContext.Provider>
     </FeedPrefsContext.Provider>
   )
 }
