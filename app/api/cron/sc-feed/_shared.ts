@@ -1241,25 +1241,34 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
     summary = `+${added} / −${removed}`
   }
 
+  // Surface PB write failures instead of swallowing them — a too-small text-field max
+  // (PB defaults to 5000) silently dropped every real diff here for months. Logging keeps
+  // the failure visible without breaking channel ingest.
+  const warnBad = async (res: Response | null, what: string) => {
+    if (res && res.ok) return
+    const detail = res ? `${res.status} ${(await res.text().catch(() => '')).slice(0, 160)}` : 'network error'
+    console.warn(`[kb-diff] ${what} write failed for ${parsed.msg_id} (article ${articleId}): ${detail}`)
+  }
+
   // Always write the diff row (even baseline/no-change) so re-runs short-circuit above.
-  await fetch(`${base}/sc_feed_kb_diffs/records`, {
+  const diffRes = await fetch(`${base}/sc_feed_kb_diffs/records`, {
     method: 'POST', headers,
     body: JSON.stringify({
       msg_id: parsed.msg_id, article_id: articleId, summary, added, removed,
       diff_html: html, preview_html: preview, title: art.title || parsed.title, url: parsed.url,
     }),
-  }).catch(() => {})
+  }).catch(() => null)
+  await warnBad(diffRes, 'diff')
 
   // Roll the snapshot forward to the current body for the next edit.
   const snapBody = JSON.stringify({
     article_id: articleId, body_normalized: current,
     edited_at: art.edited_at, title: art.title, url: parsed.url,
   })
-  if (snap) {
-    await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => {})
-  } else {
-    await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => {})
-  }
+  const snapRes2 = snap
+    ? await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => null)
+    : await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => null)
+  await warnBad(snapRes2, 'snapshot')
 }
 
 /** Prune KB diff rows older than 15 days (they're orphaned once their message is pruned).
