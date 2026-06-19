@@ -85,6 +85,14 @@ export function KbCard({ msg, isRead, onMarkRead }: {
           <span className="text-[10px] font-label text-on-surface-variant/45 truncate">
             Tracker SC{msg.ts_raw ? ` · ${timeAgo(msg.ts_raw)}` : ''}
           </span>
+          {!!diff?.dupeCount && diff.dupeCount > 1 && (
+            <span
+              title={`${diff.dupeCount} identical updates in this window`}
+              className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-violet-500/40 bg-violet-500/10 text-violet-300 text-[10px] font-label font-black"
+            >
+              ×{diff.dupeCount}
+            </span>
+          )}
           <KbSaveButton msg={msg} />
         </div>
 

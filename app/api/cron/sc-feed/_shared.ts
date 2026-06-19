@@ -9,6 +9,7 @@
 // silently breaks one feed when the other's logic is touched. See discord/route.ts.
 
 import { NextResponse } from 'next/server'
+import { createHash } from 'node:crypto'
 import TurndownService from 'turndown'
 import { emojify } from 'node-emoji'
 import { rsiTokenValue } from '@/lib/rsi-token'
@@ -1009,6 +1010,15 @@ export function normalizeKbHtml(html: string): string {
   return t
 }
 
+/** Content signature of a normalized article body. The read layer groups KB cards by
+ *  (article_id, state_sig): identical signature = identical article state = duplicate
+ *  [Updated] pings to collapse (×N); different signature = a real change = its own card.
+ *  Content-based, never time-based — two genuinely different edits in adjacent windows
+ *  always differ here. */
+export function kbStateSig(body: string): string {
+  return createHash('sha1').update(body).digest('hex').slice(0, 16)
+}
+
 function tokenizeKb(text: string): string[] {
   const out: string[] = []
   const lines = text.split('\n')
@@ -1116,9 +1126,11 @@ export function wordDiff(oldText: string, newText: string): { html: string; adde
 
 async function fetchZendeskArticle(id: string, locale: string): Promise<{ body: string; title: string; edited_at: string } | null> {
   try {
+    // Cache-bust so a stale/CDN-cached body can never make a real change look like a
+    // no-change duplicate (the dedup guard relies on the fetched body being current).
     const res = await fetch(
-      `https://support.robertsspaceindustries.com/api/v2/help_center/${locale}/articles/${id}.json`,
-      { headers: { 'Accept': 'application/json', 'User-Agent': SPECTRUM_HEADERS['User-Agent'] } }
+      `https://support.robertsspaceindustries.com/api/v2/help_center/${locale}/articles/${id}.json?_cb=${Date.now()}`,
+      { headers: { 'Accept': 'application/json', 'User-Agent': SPECTRUM_HEADERS['User-Agent'] }, cache: 'no-store' }
     )
     if (!res.ok) return null
     const j = await res.json()
@@ -1229,17 +1241,11 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
   const art = await fetchZendeskArticle(articleId, locale)
   if (!art) return
   const current = normalizeKbHtml(art.body)
+  const sig = kbStateSig(current)
 
   const snapRes = await fetch(`${base}/sc_feed_kb_snapshots/records?filter=article_id%3D"${articleId}"&perPage=1`, { headers })
     .then(r => r.json()).catch(() => null)
   const snap = snapRes?.items?.[0]
-
-  let added = 0, removed = 0, html = '', summary = '', preview = ''
-  if (snap?.body_normalized && snap.body_normalized !== current) {
-    const d = wordDiff(snap.body_normalized, current)
-    added = d.added; removed = d.removed; html = d.html; preview = d.preview
-    summary = `+${added} / −${removed}`
-  }
 
   // Surface PB write failures instead of swallowing them — a too-small text-field max
   // (PB defaults to 5000) silently dropped every real diff here for months. Logging keeps
@@ -1250,25 +1256,53 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
     console.warn(`[kb-diff] ${what} write failed for ${parsed.msg_id} (article ${articleId}): ${detail}`)
   }
 
-  // Always write the diff row (even baseline/no-change) so re-runs short-circuit above.
+  // Decide what this card records, by comparing the live article to our last snapshot:
+  //  - no snapshot      → first sighting: baseline only (no diff to show)
+  //  - body unchanged   → duplicate [Updated] ping: carry the state's existing diff forward
+  //                        onto this card too, so the diff persists for as long as ANY card
+  //                        of this state survives (the read layer shows it on the newest one)
+  //  - body changed     → a real new change: compute the diff vs the previous state
+  let row: Record<string, unknown>
+  let rollSnapshot = false
+  if (!snap?.body_normalized) {
+    row = { summary: '', added: 0, removed: 0, diff_html: '', preview_html: '' }
+    rollSnapshot = true
+  } else if (snap.body_normalized === current) {
+    const prior = await fetch(
+      `${base}/sc_feed_kb_diffs/records?filter=${encodeURIComponent(`article_id="${articleId}" && state_sig="${sig}"`)}&perPage=1`,
+      { headers }
+    ).then(r => r.json()).catch(() => null)
+    const p = prior?.items?.[0]
+    row = p
+      ? { summary: p.summary, added: p.added, removed: p.removed, diff_html: p.diff_html, preview_html: p.preview_html }
+      : { summary: '', added: 0, removed: 0, diff_html: '', preview_html: '' }
+  } else {
+    const d = wordDiff(snap.body_normalized, current)
+    row = { summary: `+${d.added} / −${d.removed}`, added: d.added, removed: d.removed, diff_html: d.html, preview_html: d.preview }
+    rollSnapshot = true
+  }
+
   const diffRes = await fetch(`${base}/sc_feed_kb_diffs/records`, {
     method: 'POST', headers,
     body: JSON.stringify({
-      msg_id: parsed.msg_id, article_id: articleId, summary, added, removed,
-      diff_html: html, preview_html: preview, title: art.title || parsed.title, url: parsed.url,
+      ...row, msg_id: parsed.msg_id, article_id: articleId, state_sig: sig,
+      title: art.title || parsed.title, url: parsed.url,
     }),
   }).catch(() => null)
   await warnBad(diffRes, 'diff')
 
-  // Roll the snapshot forward to the current body for the next edit.
-  const snapBody = JSON.stringify({
-    article_id: articleId, body_normalized: current,
-    edited_at: art.edited_at, title: art.title, url: parsed.url,
-  })
-  const snapRes2 = snap
-    ? await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => null)
-    : await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => null)
-  await warnBad(snapRes2, 'snapshot')
+  // Roll the snapshot forward ONLY when the diff row was actually recorded — a failed write
+  // must never advance (and burn) the baseline, the bug that silently lost months of diffs.
+  if (rollSnapshot && diffRes?.ok) {
+    const snapBody = JSON.stringify({
+      article_id: articleId, body_normalized: current,
+      edited_at: art.edited_at, title: art.title, url: parsed.url,
+    })
+    const snapRes2 = snap
+      ? await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => null)
+      : await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => null)
+    await warnBad(snapRes2, 'snapshot')
+  }
 }
 
 /** Prune KB diff rows older than 15 days (they're orphaned once their message is pruned).

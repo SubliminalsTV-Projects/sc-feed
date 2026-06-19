@@ -18,7 +18,7 @@ export interface FeedMessage {
   discord_jump_url?: string
   tag?: string
   dev?: string
-  kbDiff?: { summary: string; added: number; removed: number; preview?: string; excerpt?: string }
+  kbDiff?: { summary: string; added: number; removed: number; preview?: string; excerpt?: string; dupeCount?: number }
 }
 
 export interface FeedChannel {
@@ -223,7 +223,7 @@ export async function GET() {
     const cig = channels.find(c => c.id === 'cig-news')
     const kbMsgs = cig?.messages.filter(m => /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/.test(m.url)) ?? []
     if (cig && kbMsgs.length) {
-      type DiffRow = { msg_id: string; article_id?: string; summary: string; added: number; removed: number; preview_html?: string }
+      type DiffRow = { msg_id: string; article_id?: string; summary: string; added: number; removed: number; preview_html?: string; state_sig?: string }
       const filter = encodeURIComponent('(' + kbMsgs.map(m => `msg_id="${m.id}"`).join(' || ') + ')')
       const diffs = await fetch(
         `${PB_URL}/api/collections/sc_feed_kb_diffs/records?perPage=100&filter=${filter}`,
@@ -231,10 +231,22 @@ export async function GET() {
       ).then(r => r.ok ? r.json() : null).catch(() => null)
       const byMsg = new Map<string, DiffRow>((diffs?.items ?? []).map((d: DiffRow) => [d.msg_id, d]))
 
-      // Batch-fetch snapshots for cards that have no real diff (need an excerpt instead).
+      // Group KB cards by (article_id, state_sig): cards sharing a signature are the same
+      // article state — duplicate [Updated] pings to collapse into one card with a ×N pill.
+      // Cards without a stored signature (legacy rows) stay solo (no collapse).
+      const groups = new Map<string, FeedMessage[]>()
+      for (const m of kbMsgs) {
+        const d = byMsg.get(m.id)
+        const key = d?.state_sig ? `${d.article_id}::${d.state_sig}` : `solo::${m.id}`
+        const g = groups.get(key) ?? []
+        g.push(m); groups.set(key, g)
+      }
+
+      // Batch-fetch snapshots for groups that have no real diff (need an excerpt instead).
       const artIds = [...new Set(
-        kbMsgs.map(m => byMsg.get(m.id)).filter((d): d is DiffRow => !!d && d.added === 0 && d.removed === 0)
-          .map(d => d.article_id).filter((a): a is string => !!a)
+        [...groups.values()]
+          .filter(g => !g.some(m => { const d = byMsg.get(m.id); return d && (d.added > 0 || d.removed > 0) }))
+          .map(g => byMsg.get(g[0].id)?.article_id).filter((a): a is string => !!a)
       )]
       const bodyByArticle = new Map<string, string>()
       if (artIds.length) {
@@ -248,15 +260,24 @@ export async function GET() {
         }
       }
 
-      for (const m of kbMsgs) {
-        const d = byMsg.get(m.id)
-        if (d && (d.added > 0 || d.removed > 0)) {
-          m.kbDiff = { summary: d.summary, added: d.added, removed: d.removed, preview: d.preview_html }
+      const hidden = new Set<string>()
+      for (const g of groups.values()) {
+        // Survivor = newest card in the group; the rest are hidden duplicates.
+        g.sort((a, b) => (b.ts_raw ?? '').localeCompare(a.ts_raw ?? ''))
+        const survivor = g[0]
+        for (let i = 1; i < g.length; i++) hidden.add(g[i].id)
+        const dupeCount = g.length
+        // Show the group's real diff (carried on every member) if any, else an excerpt.
+        const real = g.map(m => byMsg.get(m.id)).find(d => d && (d.added > 0 || d.removed > 0))
+        if (real) {
+          survivor.kbDiff = { summary: real.summary, added: real.added, removed: real.removed, preview: real.preview_html, dupeCount }
         } else {
-          const excerpt = d?.article_id ? kbExcerpt(bodyByArticle.get(d.article_id) ?? '', m.title) : ''
-          if (excerpt) m.kbDiff = { summary: '', added: 0, removed: 0, excerpt }
+          const artId = byMsg.get(survivor.id)?.article_id
+          const excerpt = artId ? kbExcerpt(bodyByArticle.get(artId) ?? '', survivor.title) : ''
+          if (excerpt || dupeCount > 1) survivor.kbDiff = { summary: '', added: 0, removed: 0, excerpt, dupeCount }
         }
       }
+      if (hidden.size) cig.messages = cig.messages.filter(m => !hidden.has(m.id))
     }
 
     return NextResponse.json(channels, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } })
