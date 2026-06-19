@@ -12,3 +12,4 @@ next-env.d.ts
 # extension build artifacts
 extension/dist-firefox/
 extension/web-ext-artifacts/
+sc-feed.code-workspace
