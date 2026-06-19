@@ -109,7 +109,7 @@ export function KbCard({ msg, isRead, onMarkRead }: {
             className="mt-2 block w-full text-left rounded-lg border border-violet-500/25 bg-violet-500/[0.06] hover:bg-violet-500/[0.1] hover:border-violet-500/40 transition-colors px-2.5 py-2 cursor-pointer"
           >
             <span
-              className="kb-diff block text-[12px] font-body leading-relaxed text-on-surface-variant/80 line-clamp-2"
+              className="kb-diff block text-[12px] font-body leading-relaxed text-on-surface-variant/80"
               dangerouslySetInnerHTML={{ __html: diff.preview }}
             />
           </button>

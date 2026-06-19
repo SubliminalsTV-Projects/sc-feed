@@ -1045,29 +1045,47 @@ function renderRun(tag: 'ins' | 'del' | null, toks: string[]): string {
 
 type DiffRun = { tag: 'ins' | 'del' | null; toks: string[] }
 
-/** Compact one-line preview centered on the changed region (a few words of context
- *  each side, capped), for the card face. Newlines collapsed — this is a teaser. */
+/** Preview for the card face: EVERY changed line of the diff (each line that contains an
+ *  add or a removal), trimmed to a little context around its change(s) and rendered with the
+ *  same ins/del highlighting as the full diff. Shows all changes — not just the first
+ *  cluster — capped at MAX_LINES with a "+N more" note so a huge diff can't run away. */
 function buildKbPreview(runs: DiffRun[]): string {
-  const words = (toks: string[]) => toks.filter(t => t !== '\n')
-  const changed = runs.map((r, i) => (r.tag ? i : -1)).filter(i => i >= 0)
-  if (!changed.length) return ''
-  const first = changed[0], last = changed[changed.length - 1]
-  const slice: DiffRun[] = []
-  if (first > 0) {
-    const ctx = words(runs[first - 1].toks)
-    slice.push({ tag: null, toks: ctx.length > 6 ? ['…', ...ctx.slice(-6)] : ctx })
+  const CTX = 6        // context words kept on each side of a change, per line
+  const MAX_LINES = 12
+
+  // Flatten runs into a tagged token stream, split into lines on the '\n' tokens.
+  type Tagged = { tag: 'ins' | 'del' | null; tok: string }
+  const lines: Tagged[][] = [[]]
+  for (const r of runs)
+    for (const tok of r.toks) {
+      if (tok === '\n') lines.push([])
+      else lines[lines.length - 1].push({ tag: r.tag, tok })
+    }
+
+  const renderLine = (line: Tagged[]): string => {
+    const changed = line.map((t, i) => (t.tag ? i : -1)).filter(i => i >= 0)
+    if (!changed.length) return ''
+    const lo = Math.max(0, changed[0] - CTX)
+    const hi = Math.min(line.length, changed[changed.length - 1] + CTX + 1)
+    const parts: string[] = []
+    if (lo > 0) parts.push('…')
+    let k = lo
+    while (k < hi) {
+      const tag = line[k].tag
+      const toks: string[] = []
+      while (k < hi && line[k].tag === tag) toks.push(line[k++].tok)
+      parts.push(renderRun(tag, toks))
+    }
+    if (hi < line.length) parts.push('…')
+    return parts.join(' ')
   }
-  let budget = 44
-  for (let k = first; k <= last && budget > 0; k++) {
-    const w = words(runs[k].toks).slice(0, budget)
-    budget -= w.length
-    slice.push({ tag: runs[k].tag, toks: w })
-  }
-  if (last < runs.length - 1) {
-    const ctx = words(runs[last + 1].toks)
-    slice.push({ tag: null, toks: ctx.length > 6 ? [...ctx.slice(0, 6), '…'] : ctx })
-  }
-  return slice.map(r => renderRun(r.tag, r.toks)).join(' ')
+
+  const changedLines = lines.map(renderLine).filter(Boolean)
+  if (!changedLines.length) return ''
+  let html = changedLines.slice(0, MAX_LINES).join('<br>')
+  const extra = changedLines.length - MAX_LINES
+  if (extra > 0) html += `<br><span style="opacity:0.55">… +${extra} more changed line${extra > 1 ? 's' : ''}</span>`
+  return html
 }
 
 /** Word-level LCS diff of two normalized texts → rendered HTML, add/remove counts, and a
