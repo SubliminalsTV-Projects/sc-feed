@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
 import {
-  MOTD_CHANNEL_IDS, NOTIF_COLORS, NOTIF_READ_KEY, PILL,
+  MOTD_CHANNEL_IDS, NOTIF_COLORS, NOTIF_READ_KEY, NOTIF_MUTED_KEY,
+  NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT, PILL,
   useFeedPrefs, type NotifItem,
 } from './sc-feed-types'
 import { getRsiStatusTheme, timeAgo } from './sc-feed-utils'
@@ -121,54 +122,46 @@ function NotifCard({ item, isRead, onToggle }: {
   )
 }
 
-function playChime() {
+/** Play the notification sound at an explicit volume, ignoring the mute setting. Used by the
+ *  Settings preview button so the slider gives immediate feedback. */
+export function previewChime(volume: number) {
   try {
+    const vol = Math.min(1, Math.max(0, volume))
+    if (vol <= 0) return
     const audio = new Audio('/sounds/notification.mp3')
-    audio.volume = 0.6
+    audio.volume = vol
     void audio.play().catch(() => {})
   } catch { /* audio may be blocked until user interaction */ }
 }
 
+/** Auto-play on new arrivals — respects the mute toggle + volume slider (localStorage). */
+function playChime() {
+  try {
+    if (localStorage.getItem(NOTIF_MUTED_KEY) === 'true') return
+    const raw = localStorage.getItem(NOTIF_VOLUME_KEY)
+    const v = raw == null ? NOTIF_VOLUME_DEFAULT : parseFloat(raw)
+    previewChime(Number.isFinite(v) ? v : NOTIF_VOLUME_DEFAULT)
+  } catch { /* localStorage/audio best-effort */ }
+}
+
 /**
- * Bell-icon FAB + popover. Single notification surface.
+ * Notifications state hook — owns read state + unread computation, shared by the FAB (badge)
+ * and the slide-out NotificationsPanel. On new arrivals it plays the chime (respecting the
+ * mute/volume settings) and bumps the badge; it NO LONGER auto-opens the panel, since the
+ * panel now shifts feed content and an auto-open on every new item would be disruptive.
  *
- * Behaviour:
- * - FAB shows unread badge; click toggles popover.
- * - Popover only renders unread items (read ones are filtered out, never shown).
- * - When new unread items arrive, popover auto-opens and a chime plays —
- *   it stays open until the user closes it (the merged behavior from the
- *   old toast stack).
- * - Marking a card as read fades + collapses it with a 220ms CSS transition;
- *   the actual readIds/localStorage write is delayed until the animation ends
- *   so the next card slides up smoothly into the freed space.
- * - When unread hits 0 the popover shows an "All Caught Up!" empty state.
- * - The popover container is fully transparent — each card stands on its own
- *   tinted glass background so they read like the floating toasts they
- *   replaced.
- * - Read state is shared with the global Mission Control sidebar via the
- *   `notifications-read-ids` localStorage key.
+ * Read state is shared with the global Mission Control sidebar via the `notifications-read-ids`
+ * localStorage key. Marking a card read fades + collapses it (220ms) before the readIds write
+ * lands, so the next card slides up smoothly into the freed space.
  */
-export function NotificationsFab({
-  channels, open, onToggleOpen, onForceOpen, slideClass,
-}: {
-  channels: FeedChannel[]
-  open: boolean
-  onToggleOpen: () => void
-  /** Programmatically open the popover (used when new arrivals are detected). */
-  onForceOpen: () => void
-  /** Tailwind class to apply when a side panel pushes content (e.g. 'md:-translate-x-72'). */
-  slideClass?: string
-}) {
+export function useNotifications(channels: FeedChannel[]) {
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
-  const popoverRef = useRef<HTMLDivElement | null>(null)
   const lastSeenRef = useRef<Map<string, string>>(new Map())
   const isInitRef = useRef(false)
   const readIdsRef = useRef<Set<string>>(new Set())
-  const openRef = useRef(false)
 
   useEffect(() => { readIdsRef.current = readIds }, [readIds])
-  useEffect(() => { openRef.current = open }, [open])
 
   useEffect(() => {
     try {
@@ -179,9 +172,8 @@ export function NotificationsFab({
     } catch { /* keep default */ }
   }, [])
 
-  // Detect new arrivals across channels and auto-open + chime.
-  // Skip the very first run so we don't toast everything that was already there
-  // when the page loaded.
+  // Detect new arrivals across channels and chime. Skip the very first run so we don't chime
+  // for everything that was already there when the page loaded.
   useEffect(() => {
     if (!isInitRef.current) {
       for (const ch of channels) {
@@ -204,11 +196,8 @@ export function NotificationsFab({
         lastSeenRef.current.set(ch.id, latest.ts_raw)
       }
     }
-    if (hasNewUnread) {
-      if (!openRef.current) onForceOpen()
-      playChime()
-    }
-  }, [channels, onForceOpen])
+    if (hasNewUnread) playChime()
+  }, [channels])
 
   const toItem = useCallback((ch: FeedChannel, m: FeedMessage): NotifItem => ({
     id: `${ch.id}-${m.id}`,
@@ -232,37 +221,15 @@ export function NotificationsFab({
     [channels, readIds, toItem]
   )
 
-  const unreadCount = unreadItems.length
-
-  // Click-outside to close
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node
-      if (!popoverRef.current) return
-      // Don't close when clicking the FAB itself (handled by its own click)
-      if (popoverRef.current.contains(target)) return
-      const fab = document.getElementById('sc-feed-notif-fab')
-      if (fab?.contains(target)) return
-      onToggleOpen()
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [open, onToggleOpen])
-
   const handleMarkRead = useCallback((id: string) => {
-    setRemovingIds(s => {
-      const n = new Set(s); n.add(id); return n
-    })
+    setRemovingIds(s => { const n = new Set(s); n.add(id); return n })
     setTimeout(() => {
       setReadIds(prev => {
         const next = new Set(prev); next.add(id)
         try { localStorage.setItem(NOTIF_READ_KEY, JSON.stringify([...next])) } catch { /* ignore */ }
         return next
       })
-      setRemovingIds(s => {
-        const n = new Set(s); n.delete(id); return n
-      })
+      setRemovingIds(s => { const n = new Set(s); n.delete(id); return n })
     }, 220)
   }, [])
 
@@ -280,119 +247,147 @@ export function NotificationsFab({
     try { localStorage.removeItem(NOTIF_READ_KEY) } catch { /* ignore */ }
   }, [])
 
-  return (
-    <>
-      {/* Popover — anchored above the FAB. Container is transparent so each
-          card reads as an individual tinted-glass tile (matches the look of
-          the floating toasts this replaces). The header is its own glass
-          pill above the card stack. */}
-      {open && (
-        <div
-          ref={popoverRef}
-          className={`fixed bottom-[15.5rem] right-6 z-30 w-[calc(100vw-2rem)] sm:w-96 max-h-[70vh] flex flex-col gap-2 mc-slide-in transition-transform duration-200 ease-in-out ${slideClass ?? ''}`}
-        >
-          <div className="glass-card rounded-xl px-3 py-2 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <Bell className="w-4 h-4 text-primary-container" />
-              <span className="text-xs font-headline font-bold uppercase tracking-widest text-on-surface">Notifications</span>
-              {unreadCount > 0 && (
-                <span className="min-w-[1.25rem] h-5 px-1 rounded-full bg-primary-container/20 text-primary-container text-[9px] font-black flex items-center justify-center tabular-nums">
-                  {unreadCount}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {unreadCount > 0 && (
-                <button
-                  onClick={handleMarkAllRead}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container/40 transition-colors"
-                  title="Mark all as read"
-                >
-                  <CheckCheck className="w-3 h-3" />
-                  All read
-                </button>
-              )}
-              {readIds.size > 0 && (
-                <button
-                  onClick={handleMarkAllUnread}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container/40 transition-colors"
-                  title="Restore all as unread"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  All unread
-                </button>
-              )}
-              <button
-                onClick={onToggleOpen}
-                className="p-1 rounded text-on-surface-variant/60 hover:text-on-surface transition-colors"
-                title="Close"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+  return {
+    unreadItems,
+    unreadCount: unreadItems.length,
+    removingIds,
+    hasRead: readIds.size > 0,
+    handleMarkRead,
+    handleMarkAllRead,
+    handleMarkAllUnread,
+  }
+}
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-hidden">
-            {unreadCount === 0 ? (
-              <div className="glass-card rounded-xl flex flex-col items-center justify-center py-12 gap-3 text-center">
-                <div className="w-14 h-14 rounded-full bg-primary-container/10 border border-primary-container/30 flex items-center justify-center">
-                  <CheckCheck className="w-7 h-7 text-primary-container" />
-                </div>
-                <p className="text-sm font-headline font-bold text-on-surface">All Caught Up!</p>
-                <p className="text-[11px] font-label text-on-surface-variant/50 leading-relaxed max-w-[260px]">
-                  No unread notifications. New activity from your feeds will appear here.
-                </p>
-                {readIds.size > 0 && (
-                  <button
-                    onClick={handleMarkAllUnread}
-                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container/30 text-[10px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:border-primary-container/40 hover:bg-primary-container/5 transition-colors"
-                    title="Restore all notifications as unread"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    Mark everything unread
-                  </button>
-                )}
-              </div>
-            ) : (
-              unreadItems.map(item => {
-                const leaving = removingIds.has(item.id)
-                return (
-                  <div
-                    key={item.id}
-                    className={`transition-all duration-[220ms] ease-out ${
-                      leaving ? 'opacity-0 max-h-0 -translate-x-4 overflow-hidden' : 'opacity-100 max-h-[600px] translate-x-0'
-                    }`}
-                    style={{ contentVisibility: 'auto', containIntrinsicSize: '0 110px' }}
-                  >
-                    <NotifCard item={item} isRead={false} onToggle={() => handleMarkRead(item.id)} />
-                  </div>
-                )
-              })
+/** Bell FAB — toggles the slide-out panel and shows the unread badge. Positioning/state live
+ *  in ScFeedView; this is purely the floating button. */
+export function NotificationsFab({
+  unreadCount, open, onToggleOpen, slideClass,
+}: {
+  unreadCount: number
+  open: boolean
+  onToggleOpen: () => void
+  /** Tailwind class applied when the panel pushes content (e.g. 'md:-translate-x-80'). */
+  slideClass?: string
+}) {
+  return (
+    <button
+      id="sc-feed-notif-fab"
+      onClick={onToggleOpen}
+      title={unreadCount === 0 ? 'All caught up' : `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`}
+      className={`fixed bottom-24 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg ${
+        open
+          ? 'bg-primary-container text-on-primary-container'
+          : unreadCount > 0
+            ? 'bg-surface-container-high text-primary-container border border-primary-container/40 hover:brightness-110'
+            : 'bg-surface-container-high text-on-surface-variant/60 border border-outline-variant/40 hover:text-on-surface'
+      } ${slideClass ?? ''}`}
+    >
+      {open ? <X className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+      {!open && unreadCount > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-black flex items-center justify-center tabular-nums shadow-md ring-2 ring-surface" style={{ background: 'var(--mc-notif-badge)', color: 'var(--mc-notif-badge-fg)' }}>
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/** Slide-out notifications panel. Fills its container (a content-shifting column on desktop,
+ *  a full-screen takeover on mobile) — ScFeedView owns the positioning/animation wrappers. */
+export function NotificationsPanel({
+  unreadItems, unreadCount, removingIds, hasRead,
+  onMarkRead, onMarkAllRead, onMarkAllUnread, onClose,
+}: {
+  unreadItems: NotifItem[]
+  unreadCount: number
+  removingIds: Set<string>
+  hasRead: boolean
+  onMarkRead: (id: string) => void
+  onMarkAllRead: () => void
+  onMarkAllUnread: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="flex flex-col h-full w-full bg-surface-container/95 backdrop-blur-md">
+      <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-outline-variant/30">
+        <div className="flex items-center gap-2">
+          <Bell className="w-4 h-4 text-primary-container" />
+          <span className="text-xs font-headline font-bold uppercase tracking-widest text-on-surface">Notifications</span>
+          {unreadCount > 0 && (
+            <span className="min-w-[1.25rem] h-5 px-1 rounded-full bg-primary-container/20 text-primary-container text-[9px] font-black flex items-center justify-center tabular-nums">
+              {unreadCount}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {unreadCount > 0 && (
+            <button
+              onClick={onMarkAllRead}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container/40 transition-colors"
+              title="Mark all as read"
+            >
+              <CheckCheck className="w-3 h-3" />
+              All read
+            </button>
+          )}
+          {hasRead && (
+            <button
+              onClick={onMarkAllUnread}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container/40 transition-colors"
+              title="Restore all as unread"
+            >
+              <RotateCcw className="w-3 h-3" />
+              All unread
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-on-surface-variant/60 hover:text-on-surface transition-colors"
+            title="Close"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-hidden">
+        {unreadCount === 0 ? (
+          <div className="glass-card rounded-xl flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <div className="w-14 h-14 rounded-full bg-primary-container/10 border border-primary-container/30 flex items-center justify-center">
+              <CheckCheck className="w-7 h-7 text-primary-container" />
+            </div>
+            <p className="text-sm font-headline font-bold text-on-surface">All Caught Up!</p>
+            <p className="text-[11px] font-label text-on-surface-variant/50 leading-relaxed max-w-[260px]">
+              No unread notifications. New activity from your feeds will appear here.
+            </p>
+            {hasRead && (
+              <button
+                onClick={onMarkAllUnread}
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container/30 text-[10px] font-label font-black uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface hover:border-primary-container/40 hover:bg-primary-container/5 transition-colors"
+                title="Restore all notifications as unread"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Mark everything unread
+              </button>
             )}
           </div>
-        </div>
-      )}
-
-      {/* FAB */}
-      <button
-        id="sc-feed-notif-fab"
-        onClick={onToggleOpen}
-        title={unreadCount === 0 ? 'All caught up' : `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`}
-        className={`fixed bottom-24 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg ${
-          open
-            ? 'bg-primary-container text-on-primary-container'
-            : unreadCount > 0
-              ? 'bg-surface-container-high text-primary-container border border-primary-container/40 hover:brightness-110'
-              : 'bg-surface-container-high text-on-surface-variant/60 border border-outline-variant/40 hover:text-on-surface'
-        } ${slideClass ?? ''}`}
-      >
-        {open ? <X className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
-        {!open && unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-black flex items-center justify-center tabular-nums shadow-md ring-2 ring-surface" style={{ background: 'var(--mc-notif-badge)', color: 'var(--mc-notif-badge-fg)' }}>
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+        ) : (
+          unreadItems.map(item => {
+            const leaving = removingIds.has(item.id)
+            return (
+              <div
+                key={item.id}
+                className={`transition-all duration-[220ms] ease-out ${
+                  leaving ? 'opacity-0 max-h-0 -translate-x-4 overflow-hidden' : 'opacity-100 max-h-[600px] translate-x-0'
+                }`}
+                style={{ contentVisibility: 'auto', containIntrinsicSize: '0 110px' }}
+              >
+                <NotifCard item={item} isRead={false} onToggle={() => onMarkRead(item.id)} />
+              </div>
+            )
+          })
         )}
-      </button>
-    </>
+      </div>
+    </div>
   )
 }

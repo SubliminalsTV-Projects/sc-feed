@@ -52,6 +52,10 @@ export type ColumnHeight = 'full' | 'half' | 'third' | 'quarter'
 export const PILL = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9px] font-label font-black uppercase tracking-widest shrink-0 transition-colors'
 
 export const NOTIF_READ_KEY = 'notifications-read-ids'
+// Notification chime controls (read by playChime in sc-feed-notifications, set in Settings).
+export const NOTIF_MUTED_KEY = 'sc-feed-notif-muted'
+export const NOTIF_VOLUME_KEY = 'sc-feed-notif-volume'
+export const NOTIF_VOLUME_DEFAULT = 0.6
 export const NOTIF_COLORS: Record<string, string> = {
   'sc-news': 'bg-sky-500/20 text-sky-300 border-sky-500/30',
   'patch-news': 'bg-green-500/20 text-green-300 border-green-500/30',

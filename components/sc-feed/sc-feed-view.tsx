@@ -20,7 +20,7 @@ function urlBase64ToUint8Array(b64: string): Uint8Array<ArrayBuffer> {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSession, signOut } from 'next-auth/react'
-import { Download, Loader2, LogIn, LogOut, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { Loader2, LogIn, LogOut, Menu, Moon, RefreshCw, Search, ShieldCheck, Sun, User, X } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
 import {
   COLUMN_WIDTHS, DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext, SaveActionsContext,
@@ -34,7 +34,7 @@ import {
 import { getFeedLabel, timeAgo } from './sc-feed-utils'
 import { ChannelFeed, UnifiedMotdFeed, UnifiedOmniFeed } from './sc-feed-channel'
 import { SettingsPanel } from './sc-feed-settings'
-import { NotificationsFab } from './sc-feed-notifications'
+import { NotificationsFab, NotificationsPanel, useNotifications } from './sc-feed-notifications'
 import { CookieBanner } from './sc-feed-cookie-banner'
 import { GithubWidget } from './sc-feed-github-widget'
 import { PatchNotesModal } from './sc-feed-patch-notes'
@@ -112,8 +112,8 @@ export function ScFeedView() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [patchNotesOpen, setPatchNotesOpen] = useState(false)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const mobileMenuRef = useRef<HTMLDivElement | null>(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const { data: session, status: authStatus } = useSession()
   const [leaksRevealed, setLeaksRevealed] = useState(false)
   const [mobileActiveFeed, setMobileActiveFeed] = useState<string | null>(null)
@@ -157,6 +157,24 @@ export function ScFeedView() {
   const [pushError, setPushError] = useState<string | null>(null)
   const [pushTestPending, setPushTestPending] = useState(false)
   const [pushTestStatus, setPushTestStatus] = useState<'idle' | 'sent' | 'error'>('idle')
+
+  // Notification read-state + unread, shared by the Bell FAB (badge) and the slide-out panel.
+  const notif = useNotifications(channels)
+
+  // Open one side panel closes the other so feed content isn't squeezed from both sides.
+  const openSettings = () => { setSettingsOpen(o => { if (!o) setNotificationsOpen(false); return !o }) }
+  const openNotifications = () => { setNotificationsOpen(o => { if (!o) setSettingsOpen(false); return !o }) }
+
+  // PWA install — prompt flow (button now lives in Settings → App).
+  const handleInstall = async () => {
+    setSettingsOpen(false)
+    if (!installPromptRef.current) return
+    await installPromptRef.current.prompt()
+    const { outcome } = await installPromptRef.current.userChoice
+    installPromptRef.current = null
+    setShowInstallBtn(false)
+    if (outcome === 'dismissed') localStorage.setItem('sc-feed-install-dismissed', 'true')
+  }
 
   function toggleTabBar() {
     const next = !showTabBar
@@ -796,17 +814,17 @@ export function ScFeedView() {
     try { localStorage.setItem(PATCH_NOTES_SEEN_KEY, CURRENT_VERSION) } catch {}
   }, [])
 
-  // Close mobile menu on outside click.
+  // Close account menu on outside click.
   useEffect(() => {
-    if (!mobileMenuOpen) return
+    if (!accountOpen) return
     const onClick = (e: MouseEvent) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
-        setMobileMenuOpen(false)
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountOpen(false)
       }
     }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
-  }, [mobileMenuOpen])
+  }, [accountOpen])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1137,6 +1155,18 @@ export function ScFeedView() {
     userTwitchStreamers, onAddTwitch: handleAddTwitch, onRemoveTwitch: handleRemoveTwitch,
     userRSSFeeds, onAddRSS: handleAddRSS, onRemoveRSS: handleRemoveRSS,
     onOpenPatchNotes: () => { setSettingsOpen(false); setPatchNotesOpen(true) },
+    showInstall: showInstallBtn, onInstall: handleInstall,
+  }
+
+  const notifPanelProps = {
+    unreadItems: notif.unreadItems,
+    unreadCount: notif.unreadCount,
+    removingIds: notif.removingIds,
+    hasRead: notif.hasRead,
+    onMarkRead: notif.handleMarkRead,
+    onMarkAllRead: notif.handleMarkAllRead,
+    onMarkAllUnread: notif.handleMarkAllUnread,
+    onClose: () => setNotificationsOpen(false),
   }
 
   return (
@@ -1147,99 +1177,19 @@ export function ScFeedView() {
       {/* Header — three-zone layout: hamburger LEFT · logo CENTER · github RIGHT */}
       <div className="shrink-0 px-4 sm:px-6 py-3.5 border-b border-outline-variant/30 grid grid-cols-[auto_1fr_auto] items-center gap-3">
 
-        {/* LEFT — single canonical hamburger menu (all sizes) */}
-        <div className="relative justify-self-start" ref={mobileMenuRef}>
+        {/* LEFT — hamburger toggles the Settings slide-out (from the left) */}
+        <div className="justify-self-start">
           <button
-            onClick={() => setMobileMenuOpen(o => !o)}
-            className={`inline-flex items-center justify-center p-2 rounded-lg border transition-colors ${mobileMenuOpen
+            onClick={openSettings}
+            className={`inline-flex items-center justify-center p-2 rounded-lg border transition-colors ${settingsOpen
                 ? 'border-primary-container/40 bg-primary-container/10 text-primary-container'
                 : 'border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:border-outline'
               }`}
-            aria-label="Menu"
-            aria-expanded={mobileMenuOpen}
+            aria-label="Settings"
+            aria-expanded={settingsOpen}
           >
             <Menu className="w-4 h-4" />
           </button>
-          {mobileMenuOpen && (
-            <div className="absolute left-0 top-full mt-2 w-56 z-40 rounded-lg border border-outline-variant/40 bg-surface-container shadow-xl overflow-hidden">
-              {lastFetch && (
-                <div className="px-3 py-2 text-[10px] font-mono text-on-surface-variant/50 border-b border-outline-variant/30">
-                  Updated {timeAgo(lastFetch.toISOString())}
-                </div>
-              )}
-              <button
-                onClick={() => { setMobileMenuOpen(false); fetchFeed(true) }}
-                disabled={refreshing || loading}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50 text-left"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />Refresh
-              </button>
-              <button
-                onClick={() => { setMobileMenuOpen(false); setSettingsOpen(true) }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left"
-              >
-                <Settings className="w-3.5 h-3.5" />Settings
-              </button>
-              {showInstallBtn && (
-                <button
-                  onClick={async () => {
-                    setMobileMenuOpen(false)
-                    if (!installPromptRef.current) return
-                    await installPromptRef.current.prompt()
-                    const { outcome } = await installPromptRef.current.userChoice
-                    installPromptRef.current = null
-                    setShowInstallBtn(false)
-                    if (outcome === 'dismissed') {
-                      localStorage.setItem('sc-feed-install-dismissed', 'true')
-                    }
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
-                >
-                  <Download className="w-3.5 h-3.5" />Install
-                </button>
-              )}
-              <button
-                onClick={() => { setMobileMenuOpen(false); setPatchNotesOpen(true) }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-primary-container" />What&apos;s New
-              </button>
-
-              {/* Account — sign in / signed-in identity + sign out (+ owner backend) */}
-              {authStatus !== 'loading' && (
-                session ? (
-                  <>
-                    <div className="px-3 pt-2.5 pb-1 border-t border-outline-variant/30 text-[10px] font-mono text-on-surface-variant/50 truncate" title={session.user?.email ?? ''}>
-                      {session.user?.email}
-                    </div>
-                    {session.user?.role === 'owner' && (
-                      <Link
-                        href="/owner"
-                        onClick={() => setMobileMenuOpen(false)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5 text-primary-container" />Owner Backend
-                      </Link>
-                    )}
-                    <button
-                      onClick={() => { setMobileMenuOpen(false); signOut() }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />Sign Out
-                    </button>
-                  </>
-                ) : (
-                  <Link
-                    href="/login"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
-                  >
-                    <LogIn className="w-3.5 h-3.5" />Sign In
-                  </Link>
-                )
-              )}
-            </div>
-          )}
         </div>
 
         {/* CENTER — logo + version pill */}
@@ -1258,8 +1208,78 @@ export function ScFeedView() {
           </button>
         </div>
 
-        {/* RIGHT — GitHub badge */}
-        <div className="justify-self-end flex items-center">
+        {/* RIGHT — refresh · account · theme · github */}
+        <div className="justify-self-end flex items-center gap-1.5">
+          <button
+            onClick={() => fetchFeed(true)}
+            disabled={refreshing || loading}
+            title={lastFetch ? `Updated ${timeAgo(lastFetch.toISOString())}` : 'Refresh'}
+            aria-label="Refresh"
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* Account — icon button → dropdown (signed in) or sign-in link */}
+          {authStatus !== 'loading' && (
+            session ? (
+              <div className="relative" ref={accountMenuRef}>
+                <button
+                  onClick={() => setAccountOpen(o => !o)}
+                  aria-label="Account"
+                  aria-expanded={accountOpen}
+                  className={`inline-flex items-center justify-center p-2 rounded-lg border transition-colors ${accountOpen
+                      ? 'border-primary-container/40 bg-primary-container/10 text-primary-container'
+                      : 'border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:border-outline'
+                    }`}
+                >
+                  <User className="w-4 h-4" />
+                </button>
+                {accountOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-56 z-40 rounded-lg border border-outline-variant/40 bg-surface-container shadow-xl overflow-hidden">
+                    <div className="px-3 pt-2.5 pb-1.5 text-[10px] font-mono text-on-surface-variant/50 truncate" title={session.user?.email ?? ''}>
+                      {session.user?.email}
+                    </div>
+                    {session.user?.role === 'owner' && (
+                      <Link
+                        href="/owner"
+                        onClick={() => setAccountOpen(false)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-primary-container" />Owner Backend
+                      </Link>
+                    )}
+                    <button
+                      onClick={() => { setAccountOpen(false); signOut() }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-t border-outline-variant/30"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                aria-label="Sign in"
+                title="Sign in"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors"
+              >
+                <LogIn className="w-4 h-4" />
+              </Link>
+            )
+          )}
+
+          {/* Theme toggle — next to the GitHub badge */}
+          <button
+            onClick={() => setThemePref(theme === 'dark' ? 'light' : 'dark')}
+            aria-label="Toggle theme"
+            title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+
           <GithubWidget className="!hidden md:!inline-flex" />
         </div>
       </div>
@@ -1290,18 +1310,13 @@ export function ScFeedView() {
       {/* Body row */}
       <div className="relative flex flex-1 min-h-0 overflow-hidden">
 
-        {/* Mobile backdrop */}
-        {settingsOpen && (
-          <div className="md:hidden fixed inset-0 z-30 bg-black/50" onClick={() => setSettingsOpen(false)} />
-        )}
-
         {/* Desktop settings: pushes content from the LEFT */}
         <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-r border-outline-variant/30 ${settingsOpen ? 'w-72' : 'w-0 border-0'}`}>
           <SettingsPanel {...settingsPanelProps} />
         </div>
 
-        {/* Content — clicking here closes any open settings panel */}
-        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => { if (settingsOpen) setSettingsOpen(false) }}>
+        {/* Content — clicking here closes any open side panel */}
+        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => { if (settingsOpen) setSettingsOpen(false); if (notificationsOpen) setNotificationsOpen(false) }}>
           {loading ? (
             <div className="flex h-full items-center justify-center">
               <Loader2 className="w-6 h-6 text-primary-container animate-spin" />
@@ -1348,10 +1363,30 @@ export function ScFeedView() {
           )}
         </div>
 
-        {/* Mobile settings: fixed overlay from left */}
+        {/* Desktop notifications: pushes content from the RIGHT */}
+        <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-l border-outline-variant/30 ${notificationsOpen ? 'w-80' : 'w-0 border-0'}`}>
+          <NotificationsPanel {...notifPanelProps} />
+        </div>
+
+        {/* Mobile settings: full-screen takeover (slides in like a new page) */}
         {settingsOpen && (
-          <div className="md:hidden fixed left-0 top-0 h-full z-40 w-72 overflow-hidden border-r border-outline-variant/30 bg-surface-container">
-            <SettingsPanel {...settingsPanelProps} />
+          <div className="md:hidden fixed inset-0 z-50 bg-surface flex flex-col">
+            <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-outline-variant/30">
+              <span className="text-xs font-headline font-bold uppercase tracking-widest text-on-surface">Settings</span>
+              <button onClick={() => setSettingsOpen(false)} aria-label="Close settings" className="p-1 rounded text-on-surface-variant/60 hover:text-on-surface transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <SettingsPanel {...settingsPanelProps} />
+            </div>
+          </div>
+        )}
+
+        {/* Mobile notifications: full-screen takeover (slides in like a new page) */}
+        {notificationsOpen && (
+          <div className="md:hidden fixed inset-0 z-50 bg-surface">
+            <NotificationsPanel {...notifPanelProps} />
           </div>
         )}
 
@@ -1394,7 +1429,7 @@ export function ScFeedView() {
         </>
       )}
       {globalSearch && !searchOpen && (
-        <div className="fixed bottom-24 right-6 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-primary-container/40 shadow-lg max-w-[220px]">
+        <div className={`fixed bottom-24 right-6 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-primary-container/40 shadow-lg max-w-[220px] transition-transform duration-200 ease-in-out ${notificationsOpen ? 'md:-translate-x-80' : ''}`}>
           <Search className="w-3 h-3 text-primary-container/60 shrink-0" />
           <span className="text-[11px] font-label font-black text-on-surface truncate">{globalSearch}</span>
           <button onClick={() => setGlobalSearch('')} className="shrink-0 p-0.5 rounded-full hover:bg-surface-container transition-colors">
@@ -1404,18 +1439,17 @@ export function ScFeedView() {
       )}
       <button
         onClick={() => setSearchOpen(o => !o)}
-        className={`fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg text-on-primary-container ${globalSearch && !searchOpen ? 'bg-primary-container ring-2 ring-primary-container/60 ring-offset-2 ring-offset-surface' : 'bg-primary-container hover:brightness-110'}`}
+        className={`fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg text-on-primary-container ${notificationsOpen ? 'md:-translate-x-80' : ''} ${globalSearch && !searchOpen ? 'bg-primary-container ring-2 ring-primary-container/60 ring-offset-2 ring-offset-surface' : 'bg-primary-container hover:brightness-110'}`}
       >
         {searchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
       </button>
 
-      {/* Notifications FAB — stacked above the Search FAB */}
+      {/* Notifications FAB — stacked above the Search FAB; toggles the right-side panel */}
       <NotificationsFab
-        channels={channels}
+        unreadCount={notif.unreadCount}
         open={notificationsOpen}
-        onToggleOpen={() => setNotificationsOpen(o => !o)}
-        onForceOpen={() => setNotificationsOpen(true)}
-        slideClass=""
+        onToggleOpen={openNotifications}
+        slideClass={notificationsOpen ? 'md:-translate-x-80' : ''}
       />
 
       {/* SC Community FAB — top of the FAB stack, links out to RSI */}
@@ -1424,7 +1458,7 @@ export function ScFeedView() {
         target="_blank"
         rel="noopener noreferrer"
         title="Made by the Community — robertsspaceindustries.com"
-        className="fixed bottom-[10.5rem] right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface-container-high border border-outline-variant/40 hover:brightness-110"
+        className={`fixed bottom-[10.5rem] right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface-container-high border border-outline-variant/40 hover:brightness-110 transition-transform duration-200 ease-in-out ${notificationsOpen ? 'md:-translate-x-80' : ''}`}
       >
         <img
           src={theme === 'light' ? '/logos/MadeByTheCommunity_Black.png' : '/logos/MadeByTheCommunity_White.png'}
