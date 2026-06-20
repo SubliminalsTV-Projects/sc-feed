@@ -27,6 +27,7 @@ import {
   LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_UNIFIED_ID, OMNI_FEED_ID, REFRESH_INTERVAL_MS,
   YT_CREATORS_ID, TWITCH_CREATORS_ID, CUSTOM_RSS_ID, SAVED_ID,
   USER_YT_KEY, USER_TWITCH_KEY, USER_RSS_KEY,
+  NOTIF_MUTED_KEY, NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT,
   MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS,
   type ColumnHeight, type ColumnWidth, type LayoutPreset,
   type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed,
@@ -127,7 +128,8 @@ export function ScFeedView() {
   const [globalSearch, setGlobalSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [dateFormat, setDateFormat] = useState<'short' | 'long'>('short')
-  const [theme, setThemeState] = useState<'dark' | 'light'>('dark')
+  const [themePref, setThemePrefState] = useState<'dark' | 'light' | 'system'>('system')
+  const [theme, setThemeState] = useState<'dark' | 'light'>('dark') // resolved appearance (drives .light + asset choice)
   const [hideAllRead, setHideAllRead] = useState(false)
   const [layoutPresets, setLayoutPresets] = useState<LayoutPreset[]>([])
   const [omniSourceToggles, setOmniSourceToggles] = useState<Record<string, boolean>>({})
@@ -189,24 +191,53 @@ export function ScFeedView() {
     try { localStorage.setItem('sc-feed-date-format', f) } catch { /* ignore */ }
   }
 
-  // Theme toggle. Applies the .light class to <html> so all CSS-var-based
-  // utilities re-skin instantly. Plays public/sounds/SolarFlare.mp3 when going
-  // dark→light.
-  function setThemePref(next: 'dark' | 'light') {
-    setThemeState(next)
-    if (typeof window === 'undefined') return
-    if (next === 'light') {
-      document.documentElement.classList.add('light')
-      try {
-        const audio = new Audio('/sounds/SolarFlare.mp3')
-        audio.volume = 0.9
-        void audio.play().catch(() => { /* autoplay blocked */ })
-      } catch { /* audio is best-effort */ }
-    } else {
-      document.documentElement.classList.remove('light')
-    }
-    try { localStorage.setItem('sc-feed-theme', next) } catch { /* ignore */ }
+  // Resolve a preference to a concrete appearance. 'system' follows the OS.
+  function resolveTheme(pref: 'dark' | 'light' | 'system'): 'dark' | 'light' {
+    if (pref !== 'system') return pref
+    if (typeof window === 'undefined') return 'dark'
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
   }
+
+  // The Solar Flare easter-egg cue. Volume is silently linked to the notification-sound
+  // setting (mute + level) so it tracks the user's preference without exposing a control.
+  function playSolarFlare() {
+    try {
+      if (localStorage.getItem(NOTIF_MUTED_KEY) === 'true') return
+      const raw = localStorage.getItem(NOTIF_VOLUME_KEY)
+      const v = raw == null ? NOTIF_VOLUME_DEFAULT : parseFloat(raw)
+      const vol = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : NOTIF_VOLUME_DEFAULT
+      if (vol <= 0) return
+      const audio = new Audio('/sounds/SolarFlare.mp3')
+      audio.volume = vol
+      void audio.play().catch(() => { /* autoplay blocked */ })
+    } catch { /* best-effort */ }
+  }
+
+  // Apply a resolved appearance to <html>. Plays the cue only on a user-driven dark→light flip.
+  function applyResolved(resolved: 'dark' | 'light', userAction: boolean) {
+    if (userAction && resolved === 'light' && theme === 'dark') playSolarFlare()
+    setThemeState(resolved)
+    if (typeof document !== 'undefined') document.documentElement.classList.toggle('light', resolved === 'light')
+  }
+
+  function setThemePref(next: 'dark' | 'light' | 'system') {
+    setThemePrefState(next)
+    try { localStorage.setItem('sc-feed-theme', next) } catch { /* ignore */ }
+    applyResolved(resolveTheme(next), true)
+  }
+
+  // While on 'system', track OS appearance changes (no cue on auto-switch).
+  useEffect(() => {
+    if (themePref !== 'system' || typeof window === 'undefined') return
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    const onChange = () => {
+      const r = mq.matches ? 'light' : 'dark'
+      setThemeState(r)
+      document.documentElement.classList.toggle('light', r === 'light')
+    }
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [themePref])
 
   useEffect(() => { readCutoffRef.current = readCutoff }, [readCutoff])
   useEffect(() => { readIdsRef.current = readIds }, [readIds])
@@ -478,10 +509,13 @@ export function ScFeedView() {
     setLastSeen(stored)
     localStorage.setItem('sc-feed-last-seen', new Date().toISOString())
     setShowTabBar(localStorage.getItem('sc-feed-show-tabbar') === 'true')
-    if (localStorage.getItem('sc-feed-theme') === 'light') {
-      setThemeState('light')
-      document.documentElement.classList.add('light')
-    }
+    const storedPref = (localStorage.getItem('sc-feed-theme') as 'dark' | 'light' | 'system' | null) ?? 'system'
+    setThemePrefState(storedPref)
+    const resolved = storedPref === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : storedPref
+    setThemeState(resolved)
+    document.documentElement.classList.toggle('light', resolved === 'light')
     if (localStorage.getItem('sc-feed-leaks-revealed') === 'true') setLeaksRevealed(true)
     if (localStorage.getItem('sc-feed-date-format') === 'long') setDateFormat('long')
     const cutoff = localStorage.getItem('sc-feed-read-cutoff')
@@ -1137,7 +1171,7 @@ export function ScFeedView() {
     hiddenChannels, onToggleChannel: toggleChannel,
     leaksRevealed, onToggleLeaks: toggleLeaks,
     showTabBar, onToggleTabBar: toggleTabBar,
-    theme, onSetTheme: setThemePref,
+    theme: themePref, resolvedTheme: theme, onSetTheme: setThemePref,
     dateFormat, onSetDateFormat: setDateFormatPref,
     hideAllRead, onToggleHideAllRead: () => setHideAllRead(v => !v),
     onMarkAllRead: markAllReadGlobal,
@@ -1181,7 +1215,15 @@ export function ScFeedView() {
   return (
     <FeedPrefsContext.Provider value={{ dateFormat, hideAllRead }}>
     <SaveActionsContext.Provider value={{ canSave, isSaved, toggleSave }}>
-    <div className="flex flex-col hero-gradient flex-1 min-h-0">
+    <div className="relative flex flex-row flex-1 min-h-0 overflow-hidden">
+
+      {/* Desktop settings: slides from the LEFT, pushing the whole app (header included) */}
+      <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-r border-outline-variant/30 ${settingsOpen ? 'w-72' : 'w-0 border-0'}`}>
+        <SettingsPanel {...settingsPanelProps} />
+      </div>
+
+      {/* Main column — header + tab bar + content; the whole stack shifts when a panel opens */}
+      <div className="flex flex-col flex-1 min-w-0 hero-gradient overflow-hidden">
 
       {/* Header — three-zone layout: hamburger LEFT · logo CENTER · github RIGHT */}
       <div className="shrink-0 px-4 sm:px-6 py-3.5 border-b border-outline-variant/30 grid grid-cols-[auto_1fr_auto] items-center gap-3">
@@ -1316,16 +1358,8 @@ export function ScFeedView() {
         })}
       </div>
 
-      {/* Body row */}
-      <div className="relative flex flex-1 min-h-0 overflow-hidden">
-
-        {/* Desktop settings: pushes content from the LEFT */}
-        <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-r border-outline-variant/30 ${settingsOpen ? 'w-72' : 'w-0 border-0'}`}>
-          <SettingsPanel {...settingsPanelProps} />
-        </div>
-
-        {/* Content — clicking here closes any open side panel */}
-        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => { if (settingsOpen) setSettingsOpen(false); if (notificationsOpen) setNotificationsOpen(false) }}>
+      {/* Content — clicking here closes any open side panel */}
+      <div className="flex-1 min-h-0 overflow-hidden" onClick={() => { if (settingsOpen) setSettingsOpen(false); if (notificationsOpen) setNotificationsOpen(false) }}>
           {loading ? (
             <div className="flex h-full items-center justify-center">
               <Loader2 className="w-6 h-6 text-primary-container animate-spin" />
@@ -1371,11 +1405,13 @@ export function ScFeedView() {
             </>
           )}
         </div>
+      </div>
+      {/* end main column */}
 
-        {/* Desktop notifications: pushes content from the RIGHT */}
-        <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-l border-outline-variant/30 ${notificationsOpen ? 'w-80' : 'w-0 border-0'}`}>
-          <NotificationsPanel {...notifPanelProps} />
-        </div>
+      {/* Desktop notifications: slides from the RIGHT, pushing the whole app */}
+      <div className={`max-md:hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out border-l border-outline-variant/30 ${notificationsOpen ? 'w-80' : 'w-0 border-0'}`}>
+        <NotificationsPanel {...notifPanelProps} />
+      </div>
 
         {/* Mobile settings: full-screen takeover (slides in like a new page) */}
         {settingsOpen && (
@@ -1398,8 +1434,6 @@ export function ScFeedView() {
             <NotificationsPanel {...notifPanelProps} />
           </div>
         )}
-
-      </div>
 
     </div>
 
@@ -1460,21 +1494,6 @@ export function ScFeedView() {
         onToggleOpen={openNotifications}
         slideClass={notificationsOpen ? 'md:-translate-x-80' : ''}
       />
-
-      {/* SC Community FAB — top of the FAB stack, links out to RSI */}
-      <a
-        href="https://robertsspaceindustries.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Made by the Community — robertsspaceindustries.com"
-        className={`fixed bottom-[10.5rem] right-6 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface-container-high border border-outline-variant/40 hover:brightness-110 transition-transform duration-200 ease-in-out ${notificationsOpen ? 'md:-translate-x-80' : ''}`}
-      >
-        <img
-          src={theme === 'light' ? '/logos/MadeByTheCommunity_Black.png' : '/logos/MadeByTheCommunity_White.png'}
-          alt="Made by the Community"
-          className="w-9 h-9 object-contain"
-        />
-      </a>
 
       <CookieBanner />
 

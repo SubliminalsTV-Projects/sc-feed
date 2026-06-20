@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ChevronRight, ClipboardPaste, Copy, Download, Eye, EyeOff, GripVertical, Heart, LayoutTemplate, Loader2, Moon, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, User, Volume2, VolumeX, X, Youtube } from 'lucide-react'
+import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ChevronRight, ClipboardPaste, Copy, Download, Eye, EyeOff, GripVertical, Heart, Info, LayoutTemplate, Loader2, Monitor, Moon, Palette, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, User, Volume2, VolumeX, X, Youtube } from 'lucide-react'
 import { CURRENT_VERSION } from '@/lib/patch-notes'
 import type { FeedChannel } from '@/app/api/sc-feed/route'
 import { type LayoutPreset, type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed, MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS, NOTIF_MUTED_KEY, NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT } from './sc-feed-types'
@@ -10,29 +10,36 @@ import { getFeedLabel } from './sc-feed-utils'
 import { previewChime } from './sc-feed-notifications'
 
 const COLLAPSE_KEY = 'sc-feed-settings-collapsed'
+// All category ids — used to default every section to COLLAPSED on first visit.
+const SECTION_IDS = ['appearance', 'notifications', 'reading', 'layout', 'custom', 'about']
 
-/** Collapsible settings section. The label row toggles; children hide when collapsed. */
-function Section({ id, title, open, onToggle, accent, children }: {
+/** Collapsible settings section with a leading icon. The label row toggles; children hide when
+ *  collapsed. Children are wrapped in vertical spacing so merged sub-groups breathe. */
+function Section({ id, title, icon: Icon, open, onToggle, children }: {
   id: string
   title: string
+  icon: React.ElementType
   open: boolean
   onToggle: (id: string) => void
-  accent?: boolean
   children: React.ReactNode
 }) {
   return (
     <div>
-      <button onClick={() => onToggle(id)} className="w-full flex items-center justify-between mb-2 group">
-        <span className={`font-label font-black uppercase transition-colors ${accent
-          ? 'text-[10px] tracking-[0.2em] text-primary-container/70 group-hover:text-primary-container'
-          : 'text-[9px] tracking-widest text-on-surface-variant/50 group-hover:text-on-surface-variant/80'}`}>
+      <button onClick={() => onToggle(id)} className="w-full flex items-center justify-between group">
+        <span className="flex items-center gap-2 text-[11px] font-label font-black uppercase tracking-widest text-on-surface-variant/60 group-hover:text-on-surface transition-colors">
+          <Icon className="w-4 h-4 text-on-surface-variant/40 group-hover:text-on-surface-variant/70 transition-colors" />
           {title}
         </span>
-        <ChevronDown className={`w-3 h-3 shrink-0 text-on-surface-variant/30 group-hover:text-on-surface-variant/60 transition-transform ${open ? '' : '-rotate-90'}`} />
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-on-surface-variant/30 group-hover:text-on-surface-variant/60 transition-transform ${open ? '' : '-rotate-90'}`} />
       </button>
-      {open && children}
+      {open && <div className="mt-3 space-y-3">{children}</div>}
     </div>
   )
+}
+
+/** Mini sub-header inside a consolidated section. */
+function SubLabel({ children }: { children: React.ReactNode }) {
+  return <p className="text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/40 mb-1.5">{children}</p>
 }
 
 /** Avatar from the OAuth session image (Google/Discord/Twitch), with a fallback glyph. */
@@ -54,7 +61,7 @@ export function SettingsPanel({
   hiddenChannels, onToggleChannel,
   leaksRevealed, onToggleLeaks,
   showTabBar, onToggleTabBar,
-  theme, onSetTheme,
+  theme, resolvedTheme, onSetTheme,
   dateFormat, onSetDateFormat,
   hideAllRead, onToggleHideAllRead,
   onMarkAllRead, onMarkAllUnread,
@@ -74,7 +81,7 @@ export function SettingsPanel({
   hiddenChannels: Set<string>; onToggleChannel: (id: string) => void
   leaksRevealed: boolean; onToggleLeaks: () => void
   showTabBar: boolean; onToggleTabBar: () => void
-  theme: 'dark' | 'light'; onSetTheme: (t: 'dark' | 'light') => void
+  theme: 'dark' | 'light' | 'system'; resolvedTheme: 'dark' | 'light'; onSetTheme: (t: 'dark' | 'light' | 'system') => void
   dateFormat: 'short' | 'long'; onSetDateFormat: (f: 'short' | 'long') => void
   hideAllRead: boolean; onToggleHideAllRead: () => void
   onMarkAllRead: () => void
@@ -123,9 +130,13 @@ export function SettingsPanel({
 
   // Collapsible-section state (persisted). Loaded in an effect to avoid a hydration mismatch;
   // the panel is hidden (width 0) until opened, so there's no visible flash.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // Default: every category COLLAPSED on first visit (no stored value); restore choices after.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(SECTION_IDS))
   useEffect(() => {
-    try { setCollapsed(new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]'))) } catch { /* ignore */ }
+    try {
+      const stored = localStorage.getItem(COLLAPSE_KEY)
+      setCollapsed(stored ? new Set(JSON.parse(stored)) : new Set(SECTION_IDS))
+    } catch { setCollapsed(new Set(SECTION_IDS)) }
   }, [])
   const toggleSection = useCallback((id: string) => {
     setCollapsed(prev => {
@@ -172,44 +183,45 @@ export function SettingsPanel({
   return (
     <div className="@container w-full h-full overflow-y-auto p-4 space-y-5">
 
-      {/* Theme — top of settings. Light mode plays a "SOLAR FLARE!" audio cue on switch. */}
-      <Section id="theme" title="Theme" open={isOpen('theme')} onToggle={toggleSection}>
-        <div className="flex gap-1">
-          {([
-            { value: 'dark' as const, label: 'Dark', Icon: Moon },
-            { value: 'light' as const, label: 'Light', Icon: Sun },
-          ]).map(({ value, label, Icon }) => (
-            <button key={value} onClick={() => onSetTheme(value)}
-              className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1 rounded text-[10px] font-label font-black transition-colors border ${
-                theme === value
-                  ? 'bg-primary-container/15 text-primary-container border-primary-container/30'
-                  : 'bg-surface-container text-on-surface-variant/40 hover:text-on-surface-variant border-transparent'
-              }`}>
-              <Icon className="w-3 h-3" />
-              {label}
-            </button>
-          ))}
+      {/* Appearance — theme · date format · display */}
+      <Section id="appearance" title="Appearance" icon={Palette} open={isOpen('appearance')} onToggle={toggleSection}>
+        <div>
+          <SubLabel>Theme</SubLabel>
+          <div className="flex gap-1">
+            {([
+              { value: 'system' as const, label: 'System', Icon: Monitor },
+              { value: 'dark' as const, label: 'Dark', Icon: Moon },
+              { value: 'light' as const, label: 'Light', Icon: Sun },
+            ]).map(({ value, label, Icon }) => (
+              <button key={value} onClick={() => onSetTheme(value)}
+                className={`flex-1 inline-flex items-center justify-center gap-1 py-1 rounded text-[10px] font-label font-black transition-colors border ${
+                  theme === value
+                    ? 'bg-primary-container/15 text-primary-container border-primary-container/30'
+                    : 'bg-surface-container text-on-surface-variant/40 hover:text-on-surface-variant border-transparent'
+                }`}>
+                <Icon className="w-3 h-3" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-      </Section>
 
-      {/* Date Format */}
-      <Section id="date" title="Date Format" open={isOpen('date')} onToggle={toggleSection}>
-        <div className="flex gap-1">
-          {(['short', 'long'] as const).map(f => (
-            <button key={f} onClick={() => onSetDateFormat(f)}
-              className={`flex-1 py-1 rounded text-[10px] font-label font-black transition-colors border ${
-                dateFormat === f
-                  ? 'bg-primary-container/15 text-primary-container border-primary-container/30'
-                  : 'bg-surface-container text-on-surface-variant/40 hover:text-on-surface-variant border-transparent'
-              }`}>
-              {f === 'short' ? '5h / 2d' : '2d 5h'}
-            </button>
-          ))}
+        <div>
+          <SubLabel>Date format</SubLabel>
+          <div className="flex gap-1">
+            {(['short', 'long'] as const).map(f => (
+              <button key={f} onClick={() => onSetDateFormat(f)}
+                className={`flex-1 py-1 rounded text-[10px] font-label font-black transition-colors border ${
+                  dateFormat === f
+                    ? 'bg-primary-container/15 text-primary-container border-primary-container/30'
+                    : 'bg-surface-container text-on-surface-variant/40 hover:text-on-surface-variant border-transparent'
+                }`}>
+                {f === 'short' ? '5h / 2d' : '2d 5h'}
+              </button>
+            ))}
+          </div>
         </div>
-      </Section>
 
-      {/* Display */}
-      <Section id="display" title="Display" open={isOpen('display')} onToggle={toggleSection}>
         <button
           onClick={onToggleTabBar}
           className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
@@ -223,11 +235,13 @@ export function SettingsPanel({
         </button>
       </Section>
 
-      {/* Push Notifications — sits under Display */}
-      {pushSupported && (
-        <Section id="push" title="Push Notifications" open={isOpen('push')} onToggle={toggleSection}>
-          <button
-            onClick={!pushPending && pushPermission !== 'denied' ? onTogglePush : undefined}
+      {/* Notifications — push + sound */}
+      <Section id="notifications" title="Notifications" icon={Bell} open={isOpen('notifications')} onToggle={toggleSection}>
+        {pushSupported && (
+          <div>
+            <SubLabel>Push</SubLabel>
+            <button
+              onClick={!pushPending && pushPermission !== 'denied' ? onTogglePush : undefined}
             disabled={pushPending || pushPermission === 'denied'}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-colors text-left ${
               pushPending || pushPermission === 'denied' ? 'opacity-60 cursor-not-allowed' : 'hover:bg-surface-container-high'
@@ -271,11 +285,10 @@ export function SettingsPanel({
               </span>
             </button>
           )}
-        </Section>
-      )}
-
-      {/* Notification Sound — mute + volume for the new-arrival chime */}
-      <Section id="sound" title="Notification Sound" open={isOpen('sound')} onToggle={toggleSection}>
+          </div>
+        )}
+        <div>
+          <SubLabel>Sound</SubLabel>
         <button
           onClick={() => setMutedPref(!muted)}
           className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
@@ -310,10 +323,11 @@ export function SettingsPanel({
             <Bell className="w-3.5 h-3.5" />
           </button>
         </div>
+        </div>
       </Section>
 
-      {/* Leaks toggle */}
-      <Section id="leaks" title="Leaks" open={isOpen('leaks')} onToggle={toggleSection}>
+      {/* Reading — leaks + read state */}
+      <Section id="reading" title="Reading" icon={Eye} open={isOpen('reading')} onToggle={toggleSection}>
         <button onClick={onToggleLeaks}
           className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left">
           <span className={`inline-flex items-center gap-1.5 text-[11px] font-label font-black ${leaksRevealed ? 'text-on-surface' : 'text-on-surface-variant/40'}`}>
@@ -321,10 +335,6 @@ export function SettingsPanel({
             Reveal Leaks
           </span>
         </button>
-      </Section>
-
-      {/* Read state toggle — 2 cols when wide enough, collapse to 1 when narrow */}
-      <Section id="read" title="Read State" open={isOpen('read')} onToggle={toggleSection}>
         <div className="grid grid-cols-1 @[14rem]:grid-cols-2 gap-1.5">
           <button
             onClick={onToggleHideAllRead}
@@ -352,9 +362,10 @@ export function SettingsPanel({
         </div>
       </Section>
 
-      {/* Layout Presets */}
-      <Section id="presets" title="Layout Presets" open={isOpen('presets')} onToggle={toggleSection}>
+      {/* Layout — presets + feed order */}
+      <Section id="layout" title="Layout" icon={LayoutTemplate} open={isOpen('layout')} onToggle={toggleSection}>
 
+        <SubLabel>Presets</SubLabel>
         {layoutPresets.length === 0 && !savingPreset && (
           <p className="text-[10px] font-label text-on-surface-variant/25 px-1 mb-2">No saved presets</p>
         )}
@@ -489,10 +500,8 @@ export function SettingsPanel({
             </div>
           </div>
         )}
-      </Section>
 
-      {/* Feed Layout */}
-      <Section id="layout" title="Feed Layout" open={isOpen('layout')} onToggle={toggleSection}>
+        <SubLabel>Feed order</SubLabel>
         <div className="space-y-1.5">
           {order.map(id => {
             const label = getFeedLabel(id, channels)
@@ -532,10 +541,9 @@ export function SettingsPanel({
         </div>
       </Section>
 
-      {/* Custom Feeds — user-configurable sources, kept at the bottom */}
-      <div className="pt-4 border-t border-outline-variant/20">
-        <Section id="custom" title="Custom Feeds" open={isOpen('custom')} onToggle={toggleSection} accent>
-          <div className="space-y-5">
+      {/* Custom Feeds — user-configurable sources */}
+      <Section id="custom" title="Custom Feeds" icon={Rss} open={isOpen('custom')} onToggle={toggleSection}>
+        <div className="space-y-5">
         <UserChannelSection
           title="YouTube Creators"
           icon={Youtube}
@@ -565,32 +573,11 @@ export function SettingsPanel({
           onAdd={onAddRSS}
           onRemove={key => onRemoveRSS(key)}
         />
-          </div>
-        </Section>
-      </div>
+        </div>
+      </Section>
 
-      {/* Support — opens the support modal (monetization) */}
-      <button
-        onClick={onOpenSupport}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-primary-container/40 bg-primary-container/10 text-primary-container hover:bg-primary-container/15 transition-colors"
-      >
-        <Heart className="w-4 h-4 shrink-0" />
-        <span className="text-[12px] font-label font-black uppercase tracking-widest">Support SC Feed</span>
-      </button>
-
-      {/* App — install + What's New */}
-      <Section id="about" title="App" open={isOpen('about')} onToggle={toggleSection}>
-        {showInstall && (
-          <button
-            onClick={onInstall}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 mb-1.5 rounded-lg border border-outline-variant/20 bg-surface-container-high/30 hover:border-primary-container/40 hover:bg-primary-container/5 transition-colors text-left"
-          >
-            <span className="inline-flex items-center gap-2 text-[11px] font-label font-black text-on-surface">
-              <Download className="w-3.5 h-3.5 text-primary-container" />
-              Install app
-            </span>
-          </button>
-        )}
+      {/* About — what's new · support · install · community */}
+      <Section id="about" title="About" icon={Info} open={isOpen('about')} onToggle={toggleSection}>
         <button
           onClick={onOpenPatchNotes}
           className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
@@ -601,6 +588,42 @@ export function SettingsPanel({
           </span>
           <span className="text-[10px] font-mono text-on-surface-variant/50">v{CURRENT_VERSION}</span>
         </button>
+
+        <button
+          onClick={onOpenSupport}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
+        >
+          <span className="inline-flex items-center gap-2 text-[11px] font-label font-black text-on-surface">
+            <Heart className="w-3.5 h-3.5 text-red-500" />
+            Support SC Feed
+          </span>
+        </button>
+
+        {showInstall && (
+          <button
+            onClick={onInstall}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
+          >
+            <span className="inline-flex items-center gap-2 text-[11px] font-label font-black text-on-surface">
+              <Download className="w-3.5 h-3.5 text-primary-container" />
+              Install app
+            </span>
+          </button>
+        )}
+
+        <a
+          href="https://robertsspaceindustries.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Made by the Community — robertsspaceindustries.com"
+          className="flex items-center justify-center pt-1"
+        >
+          <img
+            src={resolvedTheme === 'light' ? '/logos/MadeByTheCommunity_Black.png' : '/logos/MadeByTheCommunity_White.png'}
+            alt="Made by the Community"
+            className="h-9 object-contain opacity-80 hover:opacity-100 transition-opacity"
+          />
+        </a>
       </Section>
 
       {/* Account badge — owners get a clickable link to the backend; others see identity only */}
