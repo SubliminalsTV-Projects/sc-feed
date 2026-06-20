@@ -953,7 +953,7 @@ export async function fetchYouTubeRss(newMsgs: NewMsg[], cutoff: string): Promis
 export async function pruneOldMessages() {
   // Age-based prune, but YouTube channels are EXEMPT (kept indefinitely) — which is why
   // this stays an app-level DELETE rather than a blanket Timescale retention policy.
-  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   const ytIds = YT_FEEDS.map(f => f.file_id)
   const deleted = await db.delete(messagesTbl)
     .where(and(lt(messagesTbl.tsRaw, cutoff), notInArray(messagesTbl.channelId, ytIds)))
@@ -1297,10 +1297,10 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
   }
 }
 
-/** Prune KB diff rows older than 15 days (they're orphaned once their message is pruned).
+/** Prune KB diff rows older than 30 days (they're orphaned once their message is pruned).
  *  Snapshots are NEVER pruned — they're the baseline for diffing future edits. */
 export async function pruneOldKbDiffs(): Promise<number> {
-  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   const deleted = await db.delete(kbDiffs).where(lt(kbDiffs.created, cutoff)).returning({ id: kbDiffs.id })
   return deleted.length
 }

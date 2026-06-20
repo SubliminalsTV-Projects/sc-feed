@@ -116,7 +116,7 @@ function getGuildIds(): Promise<Map<string, string>> {
 export async function GET() {
   try {
     const [rows, guildIds, rsiStatusJson, twitchStates] = await Promise.all([
-      db.select().from(messagesTbl).orderBy(desc(messagesTbl.tsRaw)).limit(500),
+      db.select().from(messagesTbl).orderBy(desc(messagesTbl.tsRaw)).limit(800),
       getGuildIds(),
       (() => {
         const ctrl = new AbortController()
