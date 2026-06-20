@@ -1,20 +1,26 @@
 import type { Metadata, Viewport } from 'next'
-import { Space_Grotesk, Inter } from 'next/font/google'
+import localFont from 'next/font/local'
 import { GoogleAnalytics } from '@next/third-parties/google'
 import { Providers } from './providers'
 import './globals.css'
 
 const gaId = process.env.NEXT_PUBLIC_GA_ID
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ['latin'],
+// Self-hosted (was next/font/google). Google's build-time font fetch was timing out in the
+// Coolify build container ("Retrying 1/3…"), slowing builds and causing transient failures.
+// Variable woff2s live in app/fonts; same CSS-var names so globals.css is unchanged.
+const spaceGrotesk = localFont({
+  src: './fonts/space-grotesk-latin-variable.woff2',
   variable: '--font-sg',
-  weight: ['300', '400', '500', '600', '700'],
+  weight: '300 700',
+  display: 'swap',
 })
 
-const inter = Inter({
-  subsets: ['latin'],
+const inter = localFont({
+  src: './fonts/inter-latin-variable.woff2',
   variable: '--font-inter',
+  weight: '100 900',
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
