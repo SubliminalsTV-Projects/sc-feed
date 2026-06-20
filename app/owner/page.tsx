@@ -55,14 +55,24 @@ function CronRow({ c }: { c: CronHealth }) {
 
 function SourceRow({ s }: { s: SourceHealth }) {
   const stale = s.ageMs == null || s.ageMs > SOURCE_STALE_MS
-  return (
-    <div className="flex items-center gap-3 py-1.5">
+  const inner = (
+    <>
       <Dot tone={stale ? 'amber' : 'green'} />
-      <span className="text-[13px] font-body text-on-surface flex-1 truncate">{s.label}</span>
+      <span className={`text-[13px] font-body flex-1 truncate text-on-surface ${s.lastUrl ? 'group-hover/src:text-primary group-hover/src:underline underline-offset-2' : ''}`}>{s.label}</span>
       <span className="text-[12px] font-body text-on-surface-variant/50 w-16 text-right tabular-nums">{s.count24h} / 24h</span>
       <span className="text-[12px] font-body text-on-surface-variant/70 w-20 text-right">{ago(s.ageMs)}</span>
-    </div>
+    </>
   )
+  if (s.lastUrl) {
+    return (
+      <a href={s.lastUrl} target="_blank" rel="noopener noreferrer"
+        title="Open latest item"
+        className="group/src flex items-center gap-3 py-1.5 -mx-2 px-2 rounded-lg hover:bg-surface-container-high/60 transition-colors">
+        {inner}
+      </a>
+    )
+  }
+  return <div className="flex items-center gap-3 py-1.5">{inner}</div>
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -107,11 +117,14 @@ export default async function OwnerPage() {
 
   return (
     <main className="min-h-screen px-4 py-10 flex justify-center">
-      <div className="w-full max-w-lg space-y-5">
-        <div className="flex items-center justify-between">
+      <div className="w-full max-w-4xl">
+        <div className="flex items-center justify-between mb-5">
           <h1 className="text-xl font-headline font-black text-on-surface">Owner backend</h1>
           <Link href="/" className="text-[12px] font-label font-black text-on-surface-variant/60 hover:text-on-surface transition-colors">← Feed</Link>
         </div>
+
+        {/* Cards flow into 2 balanced columns on desktop, single stack on mobile */}
+        <div className="space-y-5 lg:space-y-0 lg:columns-2 lg:gap-5 [&>*]:break-inside-avoid lg:[&>*]:mb-5">
 
         {/* Pipeline: DB + cron heartbeats — the "is it alive" headline */}
         <div className={CARD}>
@@ -184,7 +197,9 @@ export default async function OwnerPage() {
           </p>
         </div>
 
-        <p className="text-[11px] font-body text-on-surface-variant/40 text-center">
+        </div>
+
+        <p className="mt-6 text-[11px] font-body text-on-surface-variant/40 text-center">
           Signed in as {session.user?.email}.
         </p>
       </div>

@@ -12,6 +12,7 @@ export type SourceHealth = {
   label: string
   lastTs: string | null
   ageMs: number | null
+  lastUrl: string | null
   count24h: number
   total: number
 }
@@ -69,14 +70,24 @@ export async function getHealth(): Promise<Health> {
 
   const now = Date.now()
   const [sourceRows, countRows, hbRows] = await Promise.all([
+    // distinct-on grabs the newest row per channel (for its url + ts) and joins the per-channel
+    // counts. JS re-sorts by recency afterward (distinct-on forces channel_id-first ordering).
     sql`
-      select channel_id,
-             max(ts_raw)                                                    as last_ts,
-             count(*) filter (where ts_raw > now() - interval '24 hours')   as count_24h,
-             count(*)                                                       as total
-      from scfeed.sc_feed_messages
-      group by channel_id
-      order by max(ts_raw) desc nulls last
+      select distinct on (m.channel_id)
+             m.channel_id,
+             m.url     as last_url,
+             m.ts_raw  as last_ts,
+             c.count_24h,
+             c.total
+      from scfeed.sc_feed_messages m
+      join (
+        select channel_id,
+               count(*) filter (where ts_raw > now() - interval '24 hours') as count_24h,
+               count(*)                                                     as total
+        from scfeed.sc_feed_messages
+        group by channel_id
+      ) c on c.channel_id = m.channel_id
+      order by m.channel_id, m.ts_raw desc
     `,
     sql`
       select
@@ -91,17 +102,21 @@ export async function getHealth(): Promise<Health> {
     db.select().from(config).where(like(config.key, 'cron_hb_%')),
   ])
 
-  const sources: SourceHealth[] = sourceRows.map((r) => {
-    const last = r.last_ts ? new Date(r.last_ts as string) : null
-    return {
-      channelId: r.channel_id as string,
-      label: SOURCE_LABELS[r.channel_id as string] ?? (r.channel_id as string),
-      lastTs: last ? last.toISOString() : null,
-      ageMs: last ? now - last.getTime() : null,
-      count24h: Number(r.count_24h),
-      total: Number(r.total),
-    }
-  })
+  const sources: SourceHealth[] = sourceRows
+    .map((r) => {
+      const last = r.last_ts ? new Date(r.last_ts as string) : null
+      const url = (r.last_url as string) || ''
+      return {
+        channelId: r.channel_id as string,
+        label: SOURCE_LABELS[r.channel_id as string] ?? (r.channel_id as string),
+        lastTs: last ? last.toISOString() : null,
+        ageMs: last ? now - last.getTime() : null,
+        lastUrl: /^https?:\/\//i.test(url) ? url : null,
+        count24h: Number(r.count_24h),
+        total: Number(r.total),
+      }
+    })
+    .sort((a, b) => (a.ageMs ?? Infinity) - (b.ageMs ?? Infinity))
 
   const hbMap = new Map(hbRows.map((h) => [h.key.replace('cron_hb_', ''), h]))
   const cron: CronHealth[] = CRON_SOURCES.map((source) => {
