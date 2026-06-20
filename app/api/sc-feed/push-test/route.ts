@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
+import { eq } from 'drizzle-orm'
+import { db, pushSubscriptions } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
-
-const PB_URL = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 
 // Sends a test push to the caller's own subscription (matched by endpoint).
 // Used by the "Send test" button in Settings → Push Notifications to verify
@@ -20,15 +20,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'VAPID keys not configured on server' }, { status: 500 })
     }
 
-    const filter = encodeURIComponent(`endpoint="${endpoint}"`)
-    const lookup = await fetch(
-      `${PB_URL}/api/collections/sc_feed_push_subscriptions/records?filter=${filter}&perPage=1`
-    )
-    if (!lookup.ok) {
-      return NextResponse.json({ error: `subscription lookup failed (HTTP ${lookup.status})` }, { status: 500 })
-    }
-    const data = await lookup.json()
-    const sub = data?.items?.[0]
+    const sub = (await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)).limit(1))[0]
     if (!sub) {
       return NextResponse.json({ error: 'subscription not registered server-side — toggle push off and back on' }, { status: 404 })
     }

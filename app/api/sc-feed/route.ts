@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
+import { desc, inArray } from 'drizzle-orm'
+import { db, messages as messagesTbl, kbDiffs, kbSnapshots } from '@/lib/db'
 import { getStreamStates, isTwitchConfigured } from '@/lib/twitch'
 
-const PB_URL          = process.env.POCKETBASE_URL    ?? 'https://mc-db.subliminal.gg'
 const DISCORD_BASE    = 'https://discord.com/api/v10'
 const DISCORD_TOKEN   = process.env.DISCORD_BOT_TOKEN ?? ''
 const SUBLIMINALSTV_TWITCH_LOGIN = 'subliminalstv'
@@ -114,11 +115,8 @@ function getGuildIds(): Promise<Map<string, string>> {
 
 export async function GET() {
   try {
-    const [pbRes, guildIds, rsiStatusJson, twitchStates] = await Promise.all([
-      fetch(
-        `${PB_URL}/api/collections/sc_feed_messages/records?sort=-ts_raw&perPage=500`,
-        { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
-      ),
+    const [rows, guildIds, rsiStatusJson, twitchStates] = await Promise.all([
+      db.select().from(messagesTbl).orderBy(desc(messagesTbl.tsRaw)).limit(500),
       getGuildIds(),
       (() => {
         const ctrl = new AbortController()
@@ -133,13 +131,15 @@ export async function GET() {
         : Promise.resolve({}),
     ])
 
-    if (!pbRes.ok) throw new Error(`PB ${pbRes.status}`)
-    const data = await pbRes.json()
     const allRecords: {
       id: string; channel_id: string; channel_label: string
       msg_id: string; title: string; body?: string; url: string; source: string
       msg_timestamp: string; ts_raw: string; image: string
-    }[] = data.items ?? []
+    }[] = rows.map(r => ({
+      id: String(r.id), channel_id: r.channelId, channel_label: r.channelLabel,
+      msg_id: r.msgId, title: r.title, body: r.body, url: r.url, source: r.source,
+      msg_timestamp: r.msgTimestamp, ts_raw: r.tsRaw.toISOString(), image: r.image,
+    }))
 
     // Group by channel_id (the stored PB value), keep top 25 per channel
     const byChannel = new Map<string, typeof allRecords>()
@@ -224,12 +224,13 @@ export async function GET() {
     const kbMsgs = cig?.messages.filter(m => /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/.test(m.url)) ?? []
     if (cig && kbMsgs.length) {
       type DiffRow = { msg_id: string; article_id?: string; summary: string; added: number; removed: number; preview_html?: string; state_sig?: string }
-      const filter = encodeURIComponent('(' + kbMsgs.map(m => `msg_id="${m.id}"`).join(' || ') + ')')
-      const diffs = await fetch(
-        `${PB_URL}/api/collections/sc_feed_kb_diffs/records?perPage=100&filter=${filter}`,
-        { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
-      ).then(r => r.ok ? r.json() : null).catch(() => null)
-      const byMsg = new Map<string, DiffRow>((diffs?.items ?? []).map((d: DiffRow) => [d.msg_id, d]))
+      const diffRows = kbMsgs.length
+        ? await db.select().from(kbDiffs).where(inArray(kbDiffs.msgId, kbMsgs.map(m => m.id)))
+        : []
+      const byMsg = new Map<string, DiffRow>(diffRows.map(d => [d.msgId, {
+        msg_id: d.msgId, article_id: d.articleId, summary: d.summary,
+        added: d.added, removed: d.removed, preview_html: d.previewHtml, state_sig: d.stateSig,
+      }]))
 
       // Group KB cards by (article_id, state_sig): cards sharing a signature are the same
       // article state — duplicate [Updated] pings to collapse into one card with a ×N pill.
@@ -250,13 +251,10 @@ export async function GET() {
       )]
       const bodyByArticle = new Map<string, string>()
       if (artIds.length) {
-        const sf = encodeURIComponent('(' + artIds.map(a => `article_id="${a}"`).join(' || ') + ')')
-        const snaps = await fetch(
-          `${PB_URL}/api/collections/sc_feed_kb_snapshots/records?perPage=100&filter=${sf}`,
-          { headers: { 'Content-Type': 'application/json' }, next: { revalidate: 0 } }
-        ).then(r => r.ok ? r.json() : null).catch(() => null)
-        for (const s of (snaps?.items ?? []) as { article_id: string; body_normalized?: string }[]) {
-          if (s.body_normalized) bodyByArticle.set(s.article_id, s.body_normalized)
+        const snaps = await db.select({ articleId: kbSnapshots.articleId, bodyNormalized: kbSnapshots.bodyNormalized })
+          .from(kbSnapshots).where(inArray(kbSnapshots.articleId, artIds))
+        for (const s of snaps) {
+          if (s.bodyNormalized) bodyByArticle.set(s.articleId, s.bodyNormalized)
         }
       }
 

@@ -13,6 +13,8 @@ import { createHash } from 'node:crypto'
 import TurndownService from 'turndown'
 import { emojify } from 'node-emoji'
 import { rsiTokenValue } from '@/lib/rsi-token'
+import { and, eq, lt, notInArray } from 'drizzle-orm'
+import { db, messages as messagesTbl, kbDiffs, kbSnapshots, pushSubscriptions } from '@/lib/db'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 export const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? ''
@@ -623,35 +625,33 @@ export async function upsertMessage(
   channelLabel: string,
   msg: { msg_id: string; title: string; body?: string; url: string; source: string; msg_timestamp: string; ts_raw: string; image: string }
 ): Promise<boolean> {
-  const base    = `${PB_URL}/api/collections/sc_feed_messages/records`
-  const headers = { 'Content-Type': 'application/json' }
-
-  const existing = await fetch(
-    `${base}?filter=msg_id%3D"${msg.msg_id}"`,
-    { headers }
-  ).then(r => r.json()).catch(() => null)
-
-  const record  = existing?.items?.[0]
   // Convert emoji shortcodes (e.g. :scroll:, :hourglass:) to real Unicode emoji.
   // Central chokepoint so every source — Spectrum, Discord, Comm-Link — gets it.
   // Idempotent: already-converted emoji and unknown :tokens: pass through unchanged.
-  const payload = {
-    channel_id: channelId,
-    channel_label: channelLabel,
-    ...msg,
-    title: emojify(msg.title ?? ''),
-    body:  msg.body ? emojify(msg.body) : msg.body,
+  const tsRaw = new Date(msg.ts_raw)
+  const values = {
+    channelId,
+    channelLabel,
+    msgId:        msg.msg_id,
+    title:        emojify(msg.title ?? ''),
+    body:         msg.body ? emojify(msg.body) : '',
+    url:          msg.url ?? '',
+    source:       msg.source ?? '',
+    msgTimestamp: msg.msg_timestamp ?? '',
+    tsRaw:        isNaN(tsRaw.getTime()) ? new Date() : tsRaw,
+    image:        msg.image ?? '',
+    updated:      new Date(),
   }
 
-  if (record) {
-    await fetch(`${base}/${record.id}`, {
-      method: 'PATCH', headers, body: JSON.stringify(payload),
-    })
+  const existing = (await db.select({ id: messagesTbl.id }).from(messagesTbl)
+    .where(eq(messagesTbl.msgId, msg.msg_id)).limit(1))[0]
+
+  if (existing) {
+    await db.update(messagesTbl).set(values).where(eq(messagesTbl.id, existing.id))
     return false
-  } else {
-    await fetch(base, { method: 'POST', headers, body: JSON.stringify(payload) })
-    return true
   }
+  await db.insert(messagesTbl).values(values)
+  return true
 }
 
 // ---------- web push ----------
@@ -664,11 +664,10 @@ export async function sendPushNotifications(newMsgs: NewMsg[]) {
   const webpush = (await import('web-push')).default
   webpush.setVapidDetails('mailto:sub@subliminal.gg', vapidPublic, vapidPrivate)
 
-  const res = await fetch(
-    `${PB_URL}/api/collections/sc_feed_push_subscriptions/records?perPage=500`
-  ).then(r => r.json()).catch(() => null)
-
-  const subs: Array<{ id: string; endpoint: string; p256dh: string; auth: string }> = res?.items ?? []
+  const subs = await db.select({
+    id: pushSubscriptions.id, endpoint: pushSubscriptions.endpoint,
+    p256dh: pushSubscriptions.p256dh, auth: pushSubscriptions.auth,
+  }).from(pushSubscriptions).limit(500)
   if (!subs.length) return
 
   const first = newMsgs[0]
@@ -687,9 +686,7 @@ export async function sendPushNotifications(newMsgs: NewMsg[]) {
       )
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && 'statusCode' in err && ([404, 410].includes((err as { statusCode: number }).statusCode))) {
-        await fetch(`${PB_URL}/api/collections/sc_feed_push_subscriptions/records/${sub.id}`, {
-          method: 'DELETE',
-        }).catch(() => {})
+        await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id)).catch(() => {})
       }
     }
   }
@@ -954,21 +951,14 @@ export async function fetchYouTubeRss(newMsgs: NewMsg[], cutoff: string): Promis
 // ---------- prune ----------
 
 export async function pruneOldMessages() {
-  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
-  const ytExclusions = YT_FEEDS.map(f => `channel_id!="${f.file_id}"`).join('&&')
-  const res = await fetch(
-    `${PB_URL}/api/collections/sc_feed_messages/records?filter=${encodeURIComponent(`ts_raw<"${cutoff}"&&${ytExclusions}`)}&perPage=200`,
-    { headers: { 'Content-Type': 'application/json' } }
-  ).then(r => r.json()).catch(() => null)
-
-  let count = 0
-  for (const rec of res?.items ?? []) {
-    await fetch(`${PB_URL}/api/collections/sc_feed_messages/records/${rec.id}`, {
-      method: 'DELETE',
-    }).catch(() => {})
-    count++
-  }
-  return count
+  // Age-based prune, but YouTube channels are EXEMPT (kept indefinitely) — which is why
+  // this stays an app-level DELETE rather than a blanket Timescale retention policy.
+  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+  const ytIds = YT_FEEDS.map(f => f.file_id)
+  const deleted = await db.delete(messagesTbl)
+    .where(and(lt(messagesTbl.tsRaw, cutoff), notInArray(messagesTbl.channelId, ytIds)))
+    .returning({ id: messagesTbl.id })
+  return deleted.length
 }
 
 // ---------- knowledge base diffs (Zendesk help center) ----------
@@ -1234,9 +1224,9 @@ export async function fetchCommLinkBody(url: string, titleHint = ''): Promise<st
  *  renderer is unavailable. */
 export async function fetchStoredMessageBody(msgId: string): Promise<string> {
   try {
-    const res = await fetch(`${PB_URL}/api/collections/sc_feed_messages/records?filter=msg_id%3D"${msgId}"&perPage=1`)
-    const j = await res.json()
-    return j?.items?.[0]?.body ?? ''
+    const r = (await db.select({ body: messagesTbl.body }).from(messagesTbl)
+      .where(eq(messagesTbl.msgId, msgId)).limit(1))[0]
+    return r?.body ?? ''
   } catch {
     return ''
   }
@@ -1248,31 +1238,18 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
   const match = parsed.url.match(KB_ARTICLE_RE)
   if (!match) return
   const [, locale, articleId] = match
-  const base    = `${PB_URL}/api/collections`
-  const headers = { 'Content-Type': 'application/json' }
-
   // Idempotency: if we've already produced a diff row for this card, stop.
-  const seen = await fetch(`${base}/sc_feed_kb_diffs/records?filter=msg_id%3D"${parsed.msg_id}"&perPage=1`, { headers })
-    .then(r => r.json()).catch(() => null)
-  if (seen?.items?.[0]) return
+  const seen = (await db.select({ id: kbDiffs.id }).from(kbDiffs)
+    .where(eq(kbDiffs.msgId, parsed.msg_id)).limit(1))[0]
+  if (seen) return
 
   const art = await fetchZendeskArticle(articleId, locale)
   if (!art) return
   const current = normalizeKbHtml(art.body)
   const sig = kbStateSig(current)
 
-  const snapRes = await fetch(`${base}/sc_feed_kb_snapshots/records?filter=article_id%3D"${articleId}"&perPage=1`, { headers })
-    .then(r => r.json()).catch(() => null)
-  const snap = snapRes?.items?.[0]
-
-  // Surface PB write failures instead of swallowing them — a too-small text-field max
-  // (PB defaults to 5000) silently dropped every real diff here for months. Logging keeps
-  // the failure visible without breaking channel ingest.
-  const warnBad = async (res: Response | null, what: string) => {
-    if (res && res.ok) return
-    const detail = res ? `${res.status} ${(await res.text().catch(() => '')).slice(0, 160)}` : 'network error'
-    console.warn(`[kb-diff] ${what} write failed for ${parsed.msg_id} (article ${articleId}): ${detail}`)
-  }
+  const snap = (await db.select().from(kbSnapshots)
+    .where(eq(kbSnapshots.articleId, articleId)).limit(1))[0]
 
   // Decide what this card records, by comparing the live article to our last snapshot:
   //  - no snapshot      → first sighting: baseline only (no diff to show)
@@ -1280,62 +1257,50 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
   //                        onto this card too, so the diff persists for as long as ANY card
   //                        of this state survives (the read layer shows it on the newest one)
   //  - body changed     → a real new change: compute the diff vs the previous state
-  let row: Record<string, unknown>
+  let diff = { summary: '', added: 0, removed: 0, diffHtml: '', previewHtml: '' }
   let rollSnapshot = false
-  if (!snap?.body_normalized) {
-    row = { summary: '', added: 0, removed: 0, diff_html: '', preview_html: '' }
+  if (!snap?.bodyNormalized) {
     rollSnapshot = true
-  } else if (snap.body_normalized === current) {
-    const prior = await fetch(
-      `${base}/sc_feed_kb_diffs/records?filter=${encodeURIComponent(`article_id="${articleId}" && state_sig="${sig}"`)}&perPage=1`,
-      { headers }
-    ).then(r => r.json()).catch(() => null)
-    const p = prior?.items?.[0]
-    row = p
-      ? { summary: p.summary, added: p.added, removed: p.removed, diff_html: p.diff_html, preview_html: p.preview_html }
-      : { summary: '', added: 0, removed: 0, diff_html: '', preview_html: '' }
+  } else if (snap.bodyNormalized === current) {
+    const prior = (await db.select().from(kbDiffs)
+      .where(and(eq(kbDiffs.articleId, articleId), eq(kbDiffs.stateSig, sig))).limit(1))[0]
+    if (prior) diff = { summary: prior.summary, added: prior.added, removed: prior.removed, diffHtml: prior.diffHtml, previewHtml: prior.previewHtml }
   } else {
-    const d = wordDiff(snap.body_normalized, current)
-    row = { summary: `+${d.added} / −${d.removed}`, added: d.added, removed: d.removed, diff_html: d.html, preview_html: d.preview }
+    const d = wordDiff(snap.bodyNormalized, current)
+    diff = { summary: `+${d.added} / −${d.removed}`, added: d.added, removed: d.removed, diffHtml: d.html, previewHtml: d.preview }
     rollSnapshot = true
   }
 
-  const diffRes = await fetch(`${base}/sc_feed_kb_diffs/records`, {
-    method: 'POST', headers,
-    body: JSON.stringify({
-      ...row, msg_id: parsed.msg_id, article_id: articleId, state_sig: sig,
+  // Surface write failures instead of swallowing them (a too-small field silently dropped
+  // every real diff for months under PB; Postgres text is unbounded, but keep the logging).
+  let wrote = false
+  try {
+    const ins = await db.insert(kbDiffs).values({
+      ...diff, msgId: parsed.msg_id, articleId, stateSig: sig,
       title: art.title || parsed.title, url: parsed.url,
-    }),
-  }).catch(() => null)
-  await warnBad(diffRes, 'diff')
+    }).onConflictDoNothing({ target: kbDiffs.msgId }).returning({ id: kbDiffs.id })
+    wrote = ins.length > 0
+  } catch (e) {
+    console.warn(`[kb-diff] diff write failed for ${parsed.msg_id} (article ${articleId}): ${String(e).slice(0, 160)}`)
+  }
 
   // Roll the snapshot forward ONLY when the diff row was actually recorded — a failed write
   // must never advance (and burn) the baseline, the bug that silently lost months of diffs.
-  if (rollSnapshot && diffRes?.ok) {
-    const snapBody = JSON.stringify({
-      article_id: articleId, body_normalized: current,
-      edited_at: art.edited_at, title: art.title, url: parsed.url,
-    })
-    const snapRes2 = snap
-      ? await fetch(`${base}/sc_feed_kb_snapshots/records/${snap.id}`, { method: 'PATCH', headers, body: snapBody }).catch(() => null)
-      : await fetch(`${base}/sc_feed_kb_snapshots/records`, { method: 'POST', headers, body: snapBody }).catch(() => null)
-    await warnBad(snapRes2, 'snapshot')
+  if (rollSnapshot && wrote) {
+    const snapVals = { bodyNormalized: current, editedAt: art.edited_at ?? '', title: art.title ?? '', url: parsed.url, updated: new Date() }
+    try {
+      await db.insert(kbSnapshots).values({ articleId, ...snapVals })
+        .onConflictDoUpdate({ target: kbSnapshots.articleId, set: snapVals })
+    } catch (e) {
+      console.warn(`[kb-diff] snapshot write failed for ${parsed.msg_id} (article ${articleId}): ${String(e).slice(0, 160)}`)
+    }
   }
 }
 
 /** Prune KB diff rows older than 15 days (they're orphaned once their message is pruned).
  *  Snapshots are NEVER pruned — they're the baseline for diffing future edits. */
 export async function pruneOldKbDiffs(): Promise<number> {
-  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
-  const res = await fetch(
-    `${PB_URL}/api/collections/sc_feed_kb_diffs/records?filter=${encodeURIComponent(`created<"${cutoff}"`)}&perPage=200`,
-    { headers: { 'Content-Type': 'application/json' } }
-  ).then(r => r.json()).catch(() => null)
-
-  let count = 0
-  for (const rec of res?.items ?? []) {
-    await fetch(`${PB_URL}/api/collections/sc_feed_kb_diffs/records/${rec.id}`, { method: 'DELETE' }).catch(() => {})
-    count++
-  }
-  return count
+  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+  const deleted = await db.delete(kbDiffs).where(lt(kbDiffs.created, cutoff)).returning({ id: kbDiffs.id })
+  return deleted.length
 }
