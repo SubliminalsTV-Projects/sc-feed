@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ClipboardPaste, Copy, Download, Eye, EyeOff, GripVertical, LayoutTemplate, Loader2, Moon, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, Volume2, VolumeX, X, Youtube } from 'lucide-react'
+import Link from 'next/link'
+import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ChevronRight, ClipboardPaste, Copy, Download, Eye, EyeOff, GripVertical, Heart, LayoutTemplate, Loader2, Moon, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, User, Volume2, VolumeX, X, Youtube } from 'lucide-react'
 import { CURRENT_VERSION } from '@/lib/patch-notes'
 import type { FeedChannel } from '@/app/api/sc-feed/route'
 import { type LayoutPreset, type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed, MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS, NOTIF_MUTED_KEY, NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT } from './sc-feed-types'
@@ -34,6 +35,18 @@ function Section({ id, title, open, onToggle, accent, children }: {
   )
 }
 
+/** Avatar from the OAuth session image (Google/Discord/Twitch), with a fallback glyph. */
+function AccountAvatar({ account }: { account: { image: string | null } }) {
+  if (account.image) {
+    return <img src={account.image} alt="" referrerPolicy="no-referrer" className="w-8 h-8 rounded-full shrink-0 border border-outline-variant/40 object-cover" />
+  }
+  return (
+    <span className="w-8 h-8 rounded-full shrink-0 bg-surface-container-high border border-outline-variant/40 flex items-center justify-center text-on-surface-variant/60">
+      <User className="w-4 h-4" />
+    </span>
+  )
+}
+
 export function SettingsPanel({
   channels,
   columnOrder,
@@ -52,6 +65,8 @@ export function SettingsPanel({
   userRSSFeeds, onAddRSS, onRemoveRSS,
   onOpenPatchNotes,
   showInstall, onInstall,
+  onOpenSupport,
+  account,
 }: {
   channels: FeedChannel[]
   columnOrder: string[] | null
@@ -92,6 +107,8 @@ export function SettingsPanel({
   onOpenPatchNotes: () => void
   showInstall: boolean
   onInstall: () => void
+  onOpenSupport: () => void
+  account: { name: string | null; email: string | null; image: string | null; isOwner: boolean } | null
 }) {
   const order = columnOrder ?? []
   const [markedAllRead, setMarkedAllRead] = useState(false)
@@ -552,6 +569,15 @@ export function SettingsPanel({
         </Section>
       </div>
 
+      {/* Support — opens the support modal (monetization) */}
+      <button
+        onClick={onOpenSupport}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-primary-container/40 bg-primary-container/10 text-primary-container hover:bg-primary-container/15 transition-colors"
+      >
+        <Heart className="w-4 h-4 shrink-0" />
+        <span className="text-[12px] font-label font-black uppercase tracking-widest">Support SC Feed</span>
+      </button>
+
       {/* App — install + What's New */}
       <Section id="about" title="App" open={isOpen('about')} onToggle={toggleSection}>
         {showInstall && (
@@ -576,6 +602,28 @@ export function SettingsPanel({
           <span className="text-[10px] font-mono text-on-surface-variant/50">v{CURRENT_VERSION}</span>
         </button>
       </Section>
+
+      {/* Account badge — owners get a clickable link to the backend; others see identity only */}
+      {account && (
+        account.isOwner ? (
+          <Link href="/owner" className="flex items-center gap-2.5 pt-4 mt-1 border-t border-outline-variant/20 group">
+            <AccountAvatar account={account} />
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] font-label font-black text-on-surface truncate">{account.name || account.email}</p>
+              <p className="text-[10px] font-mono text-primary-container/70 truncate">Owner backend →</p>
+            </div>
+            <ChevronRight className="w-4 h-4 shrink-0 text-on-surface-variant/30 group-hover:text-primary-container transition-colors" />
+          </Link>
+        ) : (
+          <div className="flex items-center gap-2.5 pt-4 mt-1 border-t border-outline-variant/20">
+            <AccountAvatar account={account} />
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] font-label font-black text-on-surface truncate">{account.name || account.email}</p>
+              <p className="text-[10px] font-mono text-on-surface-variant/50 truncate">{account.email}</p>
+            </div>
+          </div>
+        )
+      )}
 
     </div>
   )

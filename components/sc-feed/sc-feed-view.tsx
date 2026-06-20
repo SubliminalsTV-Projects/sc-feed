@@ -38,6 +38,7 @@ import { NotificationsFab, NotificationsPanel, useNotifications } from './sc-fee
 import { CookieBanner } from './sc-feed-cookie-banner'
 import { GithubWidget } from './sc-feed-github-widget'
 import { PatchNotesModal } from './sc-feed-patch-notes'
+import { SupportModal } from './sc-feed-support-modal'
 import { CURRENT_VERSION, PATCH_NOTES_SEEN_KEY } from '@/lib/patch-notes'
 
 // Stable per-channel wrapper so React.memo on ChannelFeed can skip re-renders when
@@ -112,6 +113,7 @@ export function ScFeedView() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [patchNotesOpen, setPatchNotesOpen] = useState(false)
+  const [supportOpen, setSupportOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const { data: session, status: authStatus } = useSession()
@@ -1156,6 +1158,13 @@ export function ScFeedView() {
     userRSSFeeds, onAddRSS: handleAddRSS, onRemoveRSS: handleRemoveRSS,
     onOpenPatchNotes: () => { setSettingsOpen(false); setPatchNotesOpen(true) },
     showInstall: showInstallBtn, onInstall: handleInstall,
+    onOpenSupport: () => { setSettingsOpen(false); setSupportOpen(true) },
+    account: session?.user ? {
+      name: session.user.name ?? null,
+      email: session.user.email ?? null,
+      image: session.user.image ?? null,
+      isOwner: session.user.role === 'owner',
+    } : null,
   }
 
   const notifPanelProps = {
@@ -1470,6 +1479,8 @@ export function ScFeedView() {
       <CookieBanner />
 
       <PatchNotesModal open={patchNotesOpen} onClose={closePatchNotes} theme={theme} />
+
+      <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} />
 
     </SaveActionsContext.Provider>
     </FeedPrefsContext.Provider>

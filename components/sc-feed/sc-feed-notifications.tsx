@@ -282,7 +282,7 @@ export function NotificationsFab({
             : 'bg-surface-container-high text-on-surface-variant/60 border border-outline-variant/40 hover:text-on-surface'
       } ${slideClass ?? ''}`}
     >
-      {open ? <X className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+      {open ? <X className="w-5 h-5" /> : <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'animate-bell' : ''}`} />}
       {!open && unreadCount > 0 && (
         <span className="absolute -top-1 -right-1 min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-black flex items-center justify-center tabular-nums shadow-md ring-2 ring-surface" style={{ background: 'var(--mc-notif-badge)', color: 'var(--mc-notif-badge-fg)' }}>
           {unreadCount > 99 ? '99+' : unreadCount}

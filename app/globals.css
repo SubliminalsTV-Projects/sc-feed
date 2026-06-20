@@ -251,6 +251,16 @@ html, body {
   100% { transform: translateX(-50%); }
 }
 
+/* Notification bell swing — plays while there are unread notifications. Swings briefly
+ * then rests, so it draws the eye periodically without being a constant distraction. */
+@keyframes mc-bell-swing {
+  0%, 55%, 100% { transform: rotate(0); }
+  60%, 76%      { transform: rotate(11deg); }
+  68%, 84%      { transform: rotate(-11deg); }
+  92%           { transform: rotate(4deg); }
+}
+.animate-bell { animation: mc-bell-swing 2.2s ease-in-out infinite; transform-origin: top center; }
+
 /* Scrollbar — thin amber-tinted, theme-aware */
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
