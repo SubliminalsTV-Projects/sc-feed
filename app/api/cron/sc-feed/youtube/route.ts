@@ -4,6 +4,7 @@ import {
   freshCutoff,
   requireSecret,
   sendPushNotifications,
+  stampCronHeartbeat,
   type NewMsg,
 } from '../_shared'
 
@@ -28,5 +29,6 @@ export async function GET(request: Request) {
     await sendPushNotifications(newMsgs).catch(() => {})
   }
 
+  await stampCronHeartbeat('youtube', { ok: !error, count, pushed: newMsgs.length, ...(error ? { error } : {}) })
   return NextResponse.json({ ok: !error, channel: 'sc-youtube', count, pushed: newMsgs.length, ...(error ? { error } : {}) })
 }

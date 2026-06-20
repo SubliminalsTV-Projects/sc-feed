@@ -8,6 +8,7 @@ import {
   freshCutoff,
   requireSecret,
   sendPushNotifications,
+  stampCronHeartbeat,
   upsertMessage,
   type NewMsg,
 } from '../_shared'
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
 
   // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum/MOTD.
   if (!(await loadRsiToken())) {
+    await stampCronHeartbeat('spectrum', { ok: false, error: 'RSI_TOKEN not set' })
     return NextResponse.json({ error: 'RSI_TOKEN not set' }, { status: 500 })
   }
 
@@ -51,5 +53,8 @@ export async function GET(request: Request) {
     await sendPushNotifications(newMsgs).catch(() => {})
   }
 
+  const ok = Object.values(results).every((r) => (r as { ok?: boolean }).ok !== false)
+  const count = Object.values(results).reduce<number>((n, r) => n + ((r as { count?: number }).count ?? 0), 0)
+  await stampCronHeartbeat('spectrum', { ok, count, pushed: newMsgs.length, channels: results })
   return NextResponse.json({ ok: true, channels: results, pushed: newMsgs.length })
 }

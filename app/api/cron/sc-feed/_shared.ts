@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto'
 import TurndownService from 'turndown'
 import { emojify } from 'node-emoji'
 import { rsiTokenValue } from '@/lib/rsi-token'
+import { setConfigValue } from '@/lib/sc-config'
 import { and, eq, lt, notInArray } from 'drizzle-orm'
 import { db, messages as messagesTbl, kbDiffs, kbSnapshots, pushSubscriptions } from '@/lib/db'
 
@@ -48,6 +49,15 @@ export const SPECTRUM_HEADERS = {
 const LINK_RE = /\[((?:[^\[\]]|\[[^\]]*\])+?)\]\(<([^>]+)>|\[((?:[^\[\]]|\[[^\]]*\])+?)\]\(([^)]+)\)/
 
 const MERGE_WINDOW_MS = 6 * 60 * 1000
+
+// Cron heartbeat — each per-source endpoint stamps its last run into sc_feed_config
+// (key `cron_hb_<source>`, value = compact JSON summary, `updated` = run time). The owner
+// backend reads these to prove the pipeline is alive: a heartbeat older than ~2 cron cycles
+// means the job is dead, which message-freshness alone can't distinguish from "ran, nothing
+// new". Best-effort — a heartbeat write must never fail the cron run itself.
+export async function stampCronHeartbeat(source: string, summary: Record<string, unknown>): Promise<void> {
+  await setConfigValue(`cron_hb_${source}`, JSON.stringify(summary), { updated_via: 'cron' }).catch(() => {})
+}
 
 export interface DiscordMsg {
   id: string

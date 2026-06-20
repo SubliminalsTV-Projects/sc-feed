@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { fetchRsiStatusRss, requireSecret } from '../_shared'
+import { fetchRsiStatusRss, requireSecret, stampCronHeartbeat } from '../_shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,9 +10,11 @@ export async function GET(request: Request) {
   // No push for RSI status — informational, not news
   try {
     const count = await fetchRsiStatusRss()
+    await stampCronHeartbeat('status', { ok: true, count })
     return NextResponse.json({ ok: true, channel: 'rsi-status', count })
   } catch (err) {
     const cause = (err as { cause?: unknown })?.cause
+    await stampCronHeartbeat('status', { ok: false, error: String(err) })
     return NextResponse.json({
       ok: false,
       channel: 'rsi-status',

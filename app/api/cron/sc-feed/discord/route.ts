@@ -18,6 +18,7 @@ import {
   processKbDiff,
   requireSecret,
   sendPushNotifications,
+  stampCronHeartbeat,
   upsertMessage,
   type DiscordMsg,
   type NewMsg,
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
   if (unauth) return unauth
 
   if (!DISCORD_TOKEN) {
+    await stampCronHeartbeat('discord', { ok: false, error: 'DISCORD_BOT_TOKEN not set' })
     return NextResponse.json({ error: 'DISCORD_BOT_TOKEN not set' }, { status: 500 })
   }
 
@@ -146,5 +148,8 @@ export async function GET(request: Request) {
     await sendPushNotifications(newMsgs).catch(() => {})
   }
 
+  const ok = Object.values(results).every((r) => (r as { ok?: boolean }).ok !== false)
+  const count = Object.values(results).reduce<number>((n, r) => n + ((r as { count?: number }).count ?? 0), 0)
+  await stampCronHeartbeat('discord', { ok, count, pushed: newMsgs.length, channels: results })
   return NextResponse.json({ ok: true, channels: results, pushed: newMsgs.length })
 }
