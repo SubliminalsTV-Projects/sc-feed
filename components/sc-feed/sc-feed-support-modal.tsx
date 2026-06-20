@@ -8,7 +8,7 @@ const SUPPORT_OPTIONS = [
     key: 'subclub',
     title: 'Join SubClub',
     blurb: 'Membership perks and the most direct way to back the channel.',
-    href: 'https://subliminal.gg/subclub',
+    href: 'https://subliminal.gg/#subclub',
     accent: 'var(--mc-primary-container)',
     Icon: () => <Crown className="w-5 h-5" style={{ color: 'var(--mc-primary-container)' }} />,
   },
@@ -20,7 +20,7 @@ const SUPPORT_OPTIONS = [
     accent: '#FF424D',
     Icon: () => (
       <svg viewBox="0 0 24 24" width="18" height="18" fill="#FF424D" aria-hidden="true">
-        <path d="M0 .48v23.04h4.22V.48zm15.385 0c-4.764 0-8.641 3.88-8.641 8.65 0 4.755 3.877 8.623 8.641 8.623 4.75 0 8.615-3.868 8.615-8.623C24 4.36 20.136.48 15.385.48z" />
+        <path d="M22.957 7.21c-.004-3.064-2.391-5.576-5.191-6.482-3.478-1.125-8.064-.962-11.384.604C2.357 3.231 1.093 7.391 1.046 11.54c-.039 3.411.302 12.396 5.369 12.46 3.765.047 4.326-4.804 6.068-7.141 1.24-1.662 2.836-2.132 4.801-2.618 3.376-.836 5.678-3.501 5.673-7.031Z" />
       </svg>
     ),
   },

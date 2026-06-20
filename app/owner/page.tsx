@@ -18,6 +18,24 @@ const CRON_STALE_MS = 25 * 60 * 1000
 // are genuinely quiet for days).
 const SOURCE_STALE_MS = 3 * 24 * 60 * 60 * 1000
 
+// Each source row links to where that source PUBLISHES (its channel/page) — so you can click
+// through and compare what the source shows vs. what SCFeed shows. NOT the latest article URL.
+// All 4 Discord channels live in the SubliminalsTV guild (303670222097874945).
+const DISCORD_GUILD = '303670222097874945'
+const SOURCE_LINKS: Record<string, string> = {
+  '1484315008216207450': `https://discord.com/channels/${DISCORD_GUILD}/1484315008216207450`, // SC News
+  '1484315784816627903': `https://discord.com/channels/${DISCORD_GUILD}/1484315784816627903`, // Patch News
+  '933047593666236487':  `https://discord.com/channels/${DISCORD_GUILD}/933047593666236487`,  // CIG / Tracker SC
+  '1484315527416647802': `https://discord.com/channels/${DISCORD_GUILD}/1484315527416647802`, // SC Leaks
+  'spectrum-announce':    'https://robertsspaceindustries.com/spectrum/community/SC/forum/1',
+  'spectrum-patch-notes': 'https://robertsspaceindustries.com/spectrum/community/SC/forum/190048',
+  'rsi-status':           'https://status.robertsspaceindustries.com/',
+  'twitter-rsi':          'https://twitter.com/RobertsSpaceInd',
+  'sc-youtube':           'https://www.youtube.com/channel/UCTeLqJq1mXUX5WWoNXLmOIA',
+  'subliminalstv':        'https://www.youtube.com/channel/UCK2D42bb2isF77-lbNPCpXA',
+  // MOTDs are Spectrum lobby messages with no public page — left unlinked on purpose.
+}
+
 function ago(ms: number | null): string {
   if (ms == null) return 'never'
   const s = Math.round(ms / 1000)
@@ -55,18 +73,19 @@ function CronRow({ c }: { c: CronHealth }) {
 
 function SourceRow({ s }: { s: SourceHealth }) {
   const stale = s.ageMs == null || s.ageMs > SOURCE_STALE_MS
+  const href = SOURCE_LINKS[s.channelId]
   const inner = (
     <>
       <Dot tone={stale ? 'amber' : 'green'} />
-      <span className={`text-[13px] font-body flex-1 truncate text-on-surface ${s.lastUrl ? 'group-hover/src:text-primary group-hover/src:underline underline-offset-2' : ''}`}>{s.label}</span>
+      <span className={`text-[13px] font-body flex-1 truncate text-on-surface ${href ? 'group-hover/src:text-primary group-hover/src:underline underline-offset-2' : ''}`}>{s.label}</span>
       <span className="text-[12px] font-body text-on-surface-variant/50 w-16 text-right tabular-nums">{s.count24h} / 24h</span>
       <span className="text-[12px] font-body text-on-surface-variant/70 w-20 text-right">{ago(s.ageMs)}</span>
     </>
   )
-  if (s.lastUrl) {
+  if (href) {
     return (
-      <a href={s.lastUrl} target="_blank" rel="noopener noreferrer"
-        title="Open latest item"
+      <a href={href} target="_blank" rel="noopener noreferrer"
+        title="Open this source's channel/page"
         className="group/src flex items-center gap-3 py-1.5 -mx-2 px-2 rounded-lg hover:bg-surface-container-high/60 transition-colors">
         {inner}
       </a>
