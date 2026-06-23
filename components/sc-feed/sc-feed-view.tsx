@@ -41,6 +41,7 @@ import { GithubWidget } from './sc-feed-github-widget'
 import { PatchNotesModal } from './sc-feed-patch-notes'
 import { SupportModal } from './sc-feed-support-modal'
 import { CURRENT_VERSION, PATCH_NOTES_SEEN_KEY } from '@/lib/patch-notes'
+import { isEmbedded } from '@/lib/embed'
 
 // Stable per-channel wrapper so React.memo on ChannelFeed can skip re-renders when
 // only unrelated ScFeedView state (e.g. settingsOpen) changes. Defined at module level
@@ -839,7 +840,9 @@ export function ScFeedView() {
   }, [fetchFeed])
 
   // Auto-show patch notes on first visit OR when version has bumped since last close.
+  // Skipped in embedded previews so the iframe on the projects page stays clean.
   useEffect(() => {
+    if (isEmbedded()) return
     const seen = localStorage.getItem(PATCH_NOTES_SEEN_KEY)
     if (seen !== CURRENT_VERSION) setPatchNotesOpen(true)
   }, [])

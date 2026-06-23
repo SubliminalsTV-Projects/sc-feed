@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Cookie, X } from 'lucide-react'
 import Link from 'next/link'
+import { isEmbedded } from '@/lib/embed'
 
 const ACK_KEY = 'sc-feed-cookie-acknowledged'
 
@@ -10,6 +11,7 @@ export function CookieBanner() {
   const [shown, setShown] = useState(false)
 
   useEffect(() => {
+    if (isEmbedded()) return // stay hidden in embedded previews
     try {
       if (!localStorage.getItem(ACK_KEY)) setShown(true)
     } catch { /* private mode — don't show banner */ }
