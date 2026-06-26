@@ -30,14 +30,35 @@ async function getConfig() {
 
 // ---------- RSI token sync ----------
 
+const IDENTIFY_URL = 'https://robertsspaceindustries.com/api/spectrum/auth/identify'
+
+// Is this Rsi-Token authenticated as a logged-in member? RSI sets an Rsi-Token cookie even when
+// logged OUT, and an anonymous token passes public forum reads but is DENIED MOTD on every lobby.
+// So we must push an AUTHENTICATED token, not just the first Rsi-Token we find.
+// Returns: true (logged in) / false (positively anonymous) / null (couldn't tell — network error).
+async function isAuthed(token) {
+  try {
+    const res = await fetch(IDENTIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Rsi-Token': token },
+      body: '{}',
+    })
+    const d = await res.json().catch(() => null)
+    if (!d || !d.success) return null
+    return !!(d.data && d.data.member && d.data.member.id)
+  } catch { return null }
+}
+
 // Search EVERY cookie store (Zen/Firefox containers + workspaces each have their own store,
 // and the RSI login often lives in one of those, not the default). Match the name
-// case-insensitively. Stash what we saw so a miss can report a useful diagnostic.
-let lastScan = { stores: 0, names: [] }
+// case-insensitively. Among all Rsi-Token candidates, PREFER the one that's actually logged in.
+// Stash what we saw so a miss can report a useful diagnostic.
+let lastScan = { stores: 0, names: [], candidates: 0, anonymous: 0 }
 async function readCookie() {
   let stores = [{ id: undefined }]
   try { const s = await api.cookies.getAllCookieStores(); if (s && s.length) stores = s } catch { /* fall back to default */ }
   const names = new Set()
+  const candidates = new Set()
   for (const st of stores) {
     const opts = { domain: 'robertsspaceindustries.com' }
     if (st.id) opts.storeId = st.id
@@ -45,23 +66,38 @@ async function readCookie() {
     try { cs = await api.cookies.getAll(opts) } catch { /* store unreadable */ }
     for (const c of cs) {
       names.add(c.name)
-      if (c.name.toLowerCase() === COOKIE.toLowerCase() && c.value) {
-        lastScan = { stores: stores.length, names: [...names] }
-        return c.value
-      }
+      if (c.name.toLowerCase() === COOKIE.toLowerCase() && c.value) candidates.add(c.value)
     }
   }
-  lastScan = { stores: stores.length, names: [...names] }
-  return ''
+
+  let anonymous = 0, unknown = 0, firstSeen = ''
+  for (const v of candidates) {
+    if (!firstSeen) firstSeen = v
+    const authed = await isAuthed(v)
+    if (authed === true) {
+      lastScan = { stores: stores.length, names: [...names], candidates: candidates.size, anonymous }
+      return { value: v, authed: true }
+    }
+    if (authed === false) anonymous++; else unknown++
+  }
+  lastScan = { stores: stores.length, names: [...names], candidates: candidates.size, anonymous }
+
+  // No authenticated token. If `identify` was unreachable for a candidate (unknown), don't
+  // suppress it — push the first one (old behavior) rather than block a possibly-good token
+  // during an RSI hiccup. Only refuse when every candidate is POSITIVELY anonymous.
+  if (unknown > 0 && firstSeen) return { value: firstSeen, authed: null }
+  return { value: '', authed: false, sawAnonymous: anonymous > 0 }
 }
 
 async function pushToken(reason) {
-  const token = await readCookie()
+  const r = await readCookie()
+  const token = r.value
   const stamp = at => ({ at, reason })
   if (!token) {
-    const msg = lastScan.names.length
-      ? `Rsi-Token not found — saw: ${lastScan.names.slice(0, 8).join(', ')}`
-      : `no RSI cookies visible across ${lastScan.stores} store(s) — grant host access + log into RSI`
+    let msg
+    if (r.sawAnonymous) msg = `Rsi-Token is logged OUT (anonymous) — sign into RSI on your Evocati account, then retry`
+    else if (lastScan.names.length) msg = `Rsi-Token not found — saw: ${lastScan.names.slice(0, 8).join(', ')}`
+    else msg = `no RSI cookies visible across ${lastScan.stores} store(s) — grant host access + log into RSI`
     await api.storage.local.set({ lastStatus: { ok: false, msg, ...stamp(now()) } })
     return
   }
@@ -73,7 +109,8 @@ async function pushToken(reason) {
       credentials: 'include',
       body: JSON.stringify({ token }),
     })
-    await api.storage.local.set({ lastStatus: { ok: res.ok, msg: res.ok ? 'token synced' : `endpoint ${res.status}`, ...stamp(now()) } })
+    const okMsg = r.authed === true ? 'token synced (authenticated)' : 'token synced (unverified)'
+    await api.storage.local.set({ lastStatus: { ok: res.ok, msg: res.ok ? okMsg : `endpoint ${res.status}`, ...stamp(now()) } })
   } catch (e) {
     await api.storage.local.set({ lastStatus: { ok: false, msg: String(e), ...stamp(now()) } })
   }
