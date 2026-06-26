@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { auth } from '@/auth'
 import { getConfigStatus, setConfigValue } from '@/lib/sc-config'
+import { resetRsiTokenCache } from '@/lib/rsi-token'
 
 // Owner-only endpoint that stores Sub's RSI session cookie (`Rsi-Token`) into the locked
 // `sc_feed_config` singleton, replacing the manual DevTools copy-paste. The browser
@@ -49,6 +50,7 @@ export async function POST(req: Request) {
 
   try {
     await setConfigValue(KEY, token, { updated_by: a.who, updated_via: a.via === 'secret' ? 'extension' : 'owner-session' })
+    resetRsiTokenCache() // long-lived server: drop the cached token so the next fetch uses this one
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }

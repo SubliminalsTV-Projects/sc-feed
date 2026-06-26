@@ -44,7 +44,9 @@ async function checkMotd(authHeaders: AuthHeaders, lobbyId: string, signal: Abor
 
 export async function GET() {
   // Validate the same token the cron uses: PocketBase (extension-pushed) first, env fallback.
-  const token = await loadRsiToken()
+  // force=true: this is a diagnostic — it must reflect the CURRENT stored token, never a stale
+  // process-cached one, or it lies about a freshly pushed token (long-lived server).
+  const token = await loadRsiToken(true)
   if (!token) {
     return NextResponse.json({ valid: false, reason: 'RSI_TOKEN not configured', forum: false, motd: {} })
   }

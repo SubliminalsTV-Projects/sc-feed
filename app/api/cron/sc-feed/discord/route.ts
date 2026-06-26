@@ -36,8 +36,9 @@ export async function GET(request: Request) {
   }
 
   // Resolve the RSI token (PocketBase, extension-pushed → env fallback) once per run, before
-  // any Spectrum/dev-tracker enrichment reads it.
-  const rsiToken = await loadRsiToken()
+  // any Spectrum/dev-tracker enrichment reads it. force=true: re-read each cycle so a freshly
+  // pushed token is picked up immediately (long-lived server; cache is per-run, not per-process).
+  const rsiToken = await loadRsiToken(true)
 
   const results: Record<string, unknown> = {}
   const newMsgs: NewMsg[] = []

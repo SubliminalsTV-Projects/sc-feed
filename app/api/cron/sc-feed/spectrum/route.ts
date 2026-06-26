@@ -20,7 +20,9 @@ export async function GET(request: Request) {
   if (unauth) return unauth
 
   // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum/MOTD.
-  if (!(await loadRsiToken())) {
+  // force=true: re-read the stored token each cycle so a freshly pushed token is picked up
+  // immediately (the server is long-lived; without force it'd keep using the boot-time token).
+  if (!(await loadRsiToken(true))) {
     await stampCronHeartbeat('spectrum', { ok: false, error: 'RSI_TOKEN not set' })
     return NextResponse.json({ error: 'RSI_TOKEN not set' }, { status: 500 })
   }
