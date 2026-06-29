@@ -588,45 +588,9 @@ export async function fetchSpectrumForumThreads(forumId: string, label: string, 
   return count
 }
 
-export async function fetchSpectrumMotd(lobbyId: string, label: string) {
-  const res = await fetch('https://robertsspaceindustries.com/api/spectrum/lobby/getMotd', {
-    method: 'POST',
-    headers: {
-      ...SPECTRUM_HEADERS,
-      'X-Rsi-Token': rsiTokenValue(),
-      'Cookie':      `Rsi-Token=${rsiTokenValue()}`,
-    },
-    body: JSON.stringify({ lobby_id: lobbyId }),
-  })
-
-  if (!res.ok) throw new Error(`Spectrum MOTD HTTP ${res.status} for lobby ${lobbyId}`)
-  const data = await res.json()
-  if (!data.success || !data.data?.motd?.message)
-    throw new Error(`No MOTD data for lobby ${lobbyId}`)
-
-  const { message, last_modified } = data.data.motd as { message: string; last_modified: number }
-  const ts_raw = new Date(last_modified * 1000).toISOString()
-
-  const urlMatch = message.match(/\]\(([^)]+)\)/)
-  const url      = urlMatch?.[1] ?? ''
-  const title    = message
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\s*\|\s*/g, ' · ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 150)
-
-  return {
-    msg_id:        `motd-${lobbyId}-${last_modified}`,
-    title,
-    body:          message,
-    url,
-    source:        'CIG',
-    msg_timestamp: ts_raw,
-    ts_raw,
-    image:         '',
-  }
-}
+// NOTE: fetchSpectrumMotd was removed — RSI made getMotd moderator-only, so the MOTD is now
+// scraped in-browser by the extension and pushed to /api/owner/motd. SPECTRUM_MOTDS is kept as
+// the channel/label/lobby map (used by /api/owner/motd to validate + label incoming MOTDs).
 
 // ---------- pocketbase upsert ----------
 
