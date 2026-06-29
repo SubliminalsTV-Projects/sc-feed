@@ -1,9 +1,10 @@
 // SC Feed companion (owner tool, Chrome + Firefox/Zen)
 //
 // 1. RSI token sync — reads the HttpOnly `Rsi-Token` cookie from robertsspaceindustries.com
-//    and pushes it to SC Feed's owner endpoint when it changes (kills the manual DevTools
-//    copy-paste; Reddit/Spectrum/MOTD stay fresh).
-// 2. Feed awareness — polls /api/sc-feed, shows the unread count on the toolbar badge, and
+//    and pushes it to SC Feed's owner endpoint when it changes. Used for forum/dev-tracker reads.
+// 2. MOTD scrape ingest — receives the Spectrum MOTD from the content script (content.js) and
+//    pushes it to SC Feed (RSI made getMotd moderator-only, so it must be read in-browser).
+// 3. Feed awareness — polls /api/sc-feed, shows the unread count on the toolbar badge, and
 //    fires a desktop notification when new items land (even with SC Feed closed).
 //
 // Cross-browser, no build step: Firefox exposes promise-based `browser.*`, Chrome MV3 the
@@ -29,36 +30,18 @@ async function getConfig() {
 }
 
 // ---------- RSI token sync ----------
-
-const IDENTIFY_URL = 'https://robertsspaceindustries.com/api/spectrum/auth/identify'
-
-// Is this Rsi-Token authenticated as a logged-in member? RSI sets an Rsi-Token cookie even when
-// logged OUT, and an anonymous token passes public forum reads but is DENIED MOTD on every lobby.
-// So we must push an AUTHENTICATED token, not just the first Rsi-Token we find.
-// Returns: true (logged in) / false (positively anonymous) / null (couldn't tell — network error).
-async function isAuthed(token) {
-  try {
-    const res = await fetch(IDENTIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Rsi-Token': token },
-      body: '{}',
-    })
-    const d = await res.json().catch(() => null)
-    if (!d || !d.success) return null
-    return !!(d.data && d.data.member && d.data.member.id)
-  } catch { return null }
-}
-
-// Search EVERY cookie store (Zen/Firefox containers + workspaces each have their own store,
-// and the RSI login often lives in one of those, not the default). Match the name
-// case-insensitively. Among all Rsi-Token candidates, PREFER the one that's actually logged in.
-// Stash what we saw so a miss can report a useful diagnostic.
-let lastScan = { stores: 0, names: [], candidates: 0, anonymous: 0 }
+// Read the Rsi-Token cookie across every store (Zen/Firefox containers each have their own) and
+// push it. There is deliberately NO "is this token logged in?" probe: RSI's identify endpoint
+// can't be verified from a non-browser context (it reports anonymous for a perfectly valid
+// token), and an earlier probe that hit it on every cookie change rotated Sub's live RSI session
+// and logged him out. The backend just stores whatever we send; the token is used only for
+// forum/dev-tracker reads now (MOTD comes from the content-script scrape, see below).
+let lastScan = { stores: 0, names: [], candidates: 0 }
 async function readCookie() {
   let stores = [{ id: undefined }]
   try { const s = await api.cookies.getAllCookieStores(); if (s && s.length) stores = s } catch { /* fall back to default */ }
   const names = new Set()
-  const candidates = new Set()
+  const candidates = []
   for (const st of stores) {
     const opts = { domain: 'robertsspaceindustries.com' }
     if (st.id) opts.storeId = st.id
@@ -66,38 +49,22 @@ async function readCookie() {
     try { cs = await api.cookies.getAll(opts) } catch { /* store unreadable */ }
     for (const c of cs) {
       names.add(c.name)
-      if (c.name.toLowerCase() === COOKIE.toLowerCase() && c.value) candidates.add(c.value)
+      if (c.name.toLowerCase() === COOKIE.toLowerCase() && c.value) candidates.push(c.value)
     }
   }
-
-  let anonymous = 0, unknown = 0, firstSeen = ''
-  for (const v of candidates) {
-    if (!firstSeen) firstSeen = v
-    const authed = await isAuthed(v)
-    if (authed === true) {
-      lastScan = { stores: stores.length, names: [...names], candidates: candidates.size, anonymous }
-      return { value: v, authed: true }
-    }
-    if (authed === false) anonymous++; else unknown++
-  }
-  lastScan = { stores: stores.length, names: [...names], candidates: candidates.size, anonymous }
-
-  // No authenticated token. If `identify` was unreachable for a candidate (unknown), don't
-  // suppress it — push the first one (old behavior) rather than block a possibly-good token
-  // during an RSI hiccup. Only refuse when every candidate is POSITIVELY anonymous.
-  if (unknown > 0 && firstSeen) return { value: firstSeen, authed: null }
-  return { value: '', authed: false, sawAnonymous: anonymous > 0 }
+  lastScan = { stores: stores.length, names: [...names], candidates: candidates.length }
+  // Prefer the longest candidate — a real session token is never shorter than a stale stub.
+  const value = candidates.sort((a, b) => b.length - a.length)[0] || ''
+  return { value }
 }
 
 async function pushToken(reason) {
-  const r = await readCookie()
-  const token = r.value
+  const { value: token } = await readCookie()
   const stamp = at => ({ at, reason })
   if (!token) {
-    let msg
-    if (r.sawAnonymous) msg = `Rsi-Token is logged OUT (anonymous) — sign into RSI on your Evocati account, then retry`
-    else if (lastScan.names.length) msg = `Rsi-Token not found — saw: ${lastScan.names.slice(0, 8).join(', ')}`
-    else msg = `no RSI cookies visible across ${lastScan.stores} store(s) — grant host access + log into RSI`
+    const msg = lastScan.names.length
+      ? `Rsi-Token not found — saw: ${lastScan.names.slice(0, 8).join(', ')}`
+      : `no RSI cookies visible across ${lastScan.stores} store(s) — grant host access + log into RSI`
     await api.storage.local.set({ lastStatus: { ok: false, msg, ...stamp(now()) } })
     return
   }
@@ -109,10 +76,34 @@ async function pushToken(reason) {
       credentials: 'include',
       body: JSON.stringify({ token }),
     })
-    const okMsg = r.authed === true ? 'token synced (authenticated)' : 'token synced (unverified)'
-    await api.storage.local.set({ lastStatus: { ok: res.ok, msg: res.ok ? okMsg : `endpoint ${res.status}`, ...stamp(now()) } })
+    await api.storage.local.set({ lastStatus: { ok: res.ok, msg: res.ok ? 'token synced' : `endpoint ${res.status}`, ...stamp(now()) } })
   } catch (e) {
     await api.storage.local.set({ lastStatus: { ok: false, msg: String(e), ...stamp(now()) } })
+  }
+}
+
+// ---------- MOTD scrape ingest (from the Spectrum content script) ----------
+// content.js reads the MOTD off the rendered lobby and sends it here; we de-dupe by content
+// signature (per channel) so only real changes get pushed to the owner MOTD endpoint.
+function motdSig(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(16) }
+
+async function ingestMotd({ channelId, body, url }) {
+  if (!channelId || !body) return
+  const sig = motdSig(body)
+  const key = `motdSig_${channelId}`
+  const store = await api.storage.local.get([key])
+  if (store[key] === sig) return // unchanged since last push
+  const { feedUrl, secret } = await getConfig()
+  try {
+    const res = await fetch(`${feedUrl}/api/owner/motd`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+      body: JSON.stringify({ channelId, body, url, sig }),
+    })
+    if (res.ok) await api.storage.local.set({ [key]: sig, lastMotd: { ok: true, channelId, at: now() } })
+    else await api.storage.local.set({ lastMotd: { ok: false, channelId, msg: `endpoint ${res.status}`, at: now() } })
+  } catch (e) {
+    await api.storage.local.set({ lastMotd: { ok: false, channelId, msg: String(e), at: now() } })
   }
 }
 
@@ -247,6 +238,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'push-now') { pushToken('manual').then(() => sendResponse({ done: true })); return true }
   if (msg?.type === 'poll-now') { pollFeed('manual').then(() => sendResponse({ done: true })); return true }
   if (msg?.type === 'mark-seen') { markSeen().then(() => sendResponse({ done: true })); return true }
+  if (msg?.type === 'motd') { ingestMotd(msg).then(() => sendResponse({ done: true })); return true }
 })
 
 // Prime on install/startup so the badge + popup have data immediately, and (re)create the

@@ -1,13 +1,16 @@
 {
   "manifest_version": 3,
   "name": "SC Feed Companion",
-  "version": "0.2.4",
-  "description": "RSI token sync + new-item badge/notifications + 'Send to SC Feed' for SC Feed. Owner tool.",
+  "version": "0.2.5",
+  "description": "RSI token sync + new-item badge/notifications + 'Send to SC Feed' + Spectrum MOTD scraper for SC Feed. Owner tool.",
   "permissions": ["cookies", "storage", "alarms", "notifications", "contextMenus", "tabs"],
   "host_permissions": [
     "https://robertsspaceindustries.com/*",
     "https://*.robertsspaceindustries.com/*",
     "https://sc-feed.subliminal.gg/*"
+  ],
+  "content_scripts": [
+    { "matches": ["https://robertsspaceindustries.com/spectrum/*"], "js": ["content.js"], "run_at": "document_idle" }
   ],
   "background": { "service_worker": "background.js" },
   "action": { "default_popup": "popup.html", "default_title": "SC Feed Companion" }

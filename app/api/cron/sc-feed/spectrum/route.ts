@@ -2,14 +2,11 @@ import { NextResponse } from 'next/server'
 import { loadRsiToken } from '@/lib/rsi-token'
 import {
   SPECTRUM_FORUMS,
-  SPECTRUM_MOTDS,
   fetchSpectrumForumThreads,
-  fetchSpectrumMotd,
   freshCutoff,
   requireSecret,
   sendPushNotifications,
   stampCronHeartbeat,
-  upsertMessage,
   type NewMsg,
 } from '../_shared'
 
@@ -19,7 +16,7 @@ export async function GET(request: Request) {
   const unauth = requireSecret(request)
   if (unauth) return unauth
 
-  // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum/MOTD.
+  // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum forum reads.
   // force=true: re-read the stored token each cycle so a freshly pushed token is picked up
   // immediately (the server is long-lived; without force it'd keep using the boot-time token).
   if (!(await loadRsiToken(true))) {
@@ -40,16 +37,9 @@ export async function GET(request: Request) {
     }
   }
 
-  // Spectrum MOTDs — upsert only, no push (MOTD changes are informational, not news)
-  for (const motd of SPECTRUM_MOTDS) {
-    try {
-      const parsed = await fetchSpectrumMotd(motd.lobbyId, motd.label)
-      await upsertMessage(motd.channelId, motd.label, parsed)
-      results[motd.channelId] = { ok: true }
-    } catch (err) {
-      results[motd.channelId] = { ok: false, error: String(err) }
-    }
-  }
+  // NOTE: Spectrum MOTDs are no longer fetched here. RSI made getMotd moderator-only (denied
+  // even to a logged-in Evocati member from a server context), so the MOTD is now scraped from
+  // the rendered lobby page by the browser extension and pushed to /api/owner/motd.
 
   if (newMsgs.length > 0) {
     await sendPushNotifications(newMsgs).catch(() => {})

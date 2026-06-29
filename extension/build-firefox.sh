@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 OUT="dist-firefox"
 rm -rf "$OUT" && mkdir -p "$OUT"
-cp background.js popup.html popup.js "$OUT"/
+cp background.js content.js popup.html popup.js "$OUT"/
 cp manifest.firefox.json "$OUT"/manifest.json
 echo "Built ./$OUT"
 echo "Sign it (unlisted) with:"

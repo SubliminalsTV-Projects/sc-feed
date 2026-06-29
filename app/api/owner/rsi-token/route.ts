@@ -12,26 +12,16 @@ import { resetRsiTokenCache } from '@/lib/rsi-token'
 // OR the owner-held push secret, never a plain guest; (2) the value always lands in THE one
 // `rsi_token` row (sc-config upserts, never inserts per-user); (3) the PB collection itself
 // is admin-only (no open writes). A signed-in guest hitting this gets 403.
+//
+// NOTE: there is deliberately NO "is this token logged in?" probe. RSI's identify endpoint
+// can't be verified from a server context — it reports anonymous for a perfectly valid token
+// (member resolution needs browser-only context), so the old probe rejected every real push.
+// The token is used only for forum/dev-tracker reads now; the MOTD is scraped in-browser by the
+// extension and pushed to /api/owner/motd, since RSI made getMotd moderator-only.
 
 export const dynamic = 'force-dynamic'
 
 const KEY = 'rsi_token'
-
-// Probe RSI's identify endpoint: is this Rsi-Token logged in as a member, or an anonymous device
-// token? 'authed' (logged in) / 'anonymous' (positively logged out) / 'unknown' (couldn't tell).
-async function tokenAuthState(token: string): Promise<'authed' | 'anonymous' | 'unknown'> {
-  try {
-    const res = await fetch('https://robertsspaceindustries.com/api/spectrum/auth/identify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Rsi-Token': token },
-      body: '{}',
-      signal: AbortSignal.timeout(6000),
-    })
-    const d = await res.json().catch(() => null) as { success?: number; data?: { member?: { id?: unknown } } } | null
-    if (!d || !d.success) return 'unknown'
-    return d.data?.member?.id ? 'authed' : 'anonymous'
-  } catch { return 'unknown' }
-}
 
 function secretOk(req: Request): boolean {
   const secret = process.env.OWNER_PUSH_SECRET
@@ -62,14 +52,6 @@ export async function POST(req: Request) {
   // extension push can't wipe a working token.
   if (token.length < 16 || /\s/.test(token)) {
     return NextResponse.json({ error: 'token missing or malformed' }, { status: 422 })
-  }
-
-  // Refuse a logged-OUT (anonymous) Rsi-Token. RSI sets one even when signed out; it passes the
-  // sanity check and public forum reads but is denied MOTD on every lobby, so storing it silently
-  // breaks MOTD and clobbers a good token. Only reject on a CONFIDENT anonymous result — fail open
-  // on a network error so an RSI hiccup can't block a legit push.
-  if ((await tokenAuthState(token)) === 'anonymous') {
-    return NextResponse.json({ error: 'token is logged out (anonymous) — sign into RSI first' }, { status: 422 })
   }
 
   try {
