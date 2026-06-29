@@ -18,7 +18,14 @@ import { and, eq, lt, notInArray } from 'drizzle-orm'
 import { db, messages as messagesTbl, kbDiffs, kbSnapshots, pushSubscriptions } from '@/lib/db'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
-export const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? ''
+// Normalize the Discord bot token so it works as the Authorization header regardless of how the
+// host stored it: Coolify wraps any space-containing env value in single quotes and Docker keeps
+// them literal, and the env may or may not already include the "Bot " prefix. Strip surrounding
+// quotes, then ensure the "Bot " prefix. (Store the BARE token in Coolify — no space → no quoting.)
+const RAW_DISCORD_TOKEN = (process.env.DISCORD_BOT_TOKEN ?? '').trim().replace(/^['"]|['"]$/g, '')
+export const DISCORD_TOKEN = RAW_DISCORD_TOKEN
+  ? (/^Bot\s/i.test(RAW_DISCORD_TOKEN) ? RAW_DISCORD_TOKEN : `Bot ${RAW_DISCORD_TOKEN}`)
+  : ''
 export const DISCORD_BASE  = 'https://discord.com/api/v10'
 
 export const DISCORD_CHANNELS = [
