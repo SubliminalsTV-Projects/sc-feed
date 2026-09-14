@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
-import { GoogleAnalytics } from '@next/third-parties/google'
+import { Analytics } from '@/components/analytics'
+import { UMAMI_WEBSITE_ID } from '@/lib/analytics'
 import { Providers } from './providers'
 import './globals.css'
 
@@ -52,7 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </div>
         </Providers>
-        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
+        <Analytics gaId={gaId} umamiWebsiteId={UMAMI_WEBSITE_ID} />
       </body>
     </html>
   )
