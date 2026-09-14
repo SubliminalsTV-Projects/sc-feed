@@ -5,6 +5,7 @@ import { ChevronLeft } from 'lucide-react'
 export const metadata: Metadata = {
   title: 'Privacy — SC Feed',
   description: 'What SC Feed stores in your browser, what we send to our server, and what we don\'t do.',
+  alternates: { canonical: '/privacy' },
 }
 
 export default function PrivacyPage() {
