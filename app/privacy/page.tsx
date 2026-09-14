@@ -22,12 +22,12 @@ export default function PrivacyPage() {
 
         <h1 className="text-3xl sm:text-4xl font-headline font-black text-on-surface mb-2">Privacy</h1>
         <p className="text-sm font-body text-on-surface-variant/70 mb-10">
-          Last updated: May 2026
+          Last updated: September 2026
         </p>
 
         <Section title="TL;DR">
           <p>
-            SC Feed stores your preferences in your browser. We use Google Analytics for anonymous,
+            SC Feed stores your preferences in your browser. We use Google Analytics and a self-hosted Umami for anonymous,
             aggregate usage stats (which pages get visited, roughly how many people use the app) &mdash;
             but we don&apos;t sell your data, don&apos;t run ads, and don&apos;t build a profile on you.
             Push notifications are optional and only sent for new feed activity.
@@ -75,6 +75,14 @@ export default function PrivacyPage() {
             We don&apos;t enable Google&apos;s advertising features, don&apos;t use it to build an advertising
             profile, and don&apos;t share the data with anyone. You can block it with most ad/tracker blockers
             or your browser&apos;s &ldquo;Do Not Track&rdquo; / privacy settings, and SC Feed will work exactly the same.
+          </p>
+          <p>
+            We also run <strong>Umami</strong>, an open-source analytics tool we host ourselves at
+            {' '}<code>stats.subliminal.gg</code>. It records the same kind of aggregate numbers &mdash; page views,
+            referrer, browser, device, screen size, approximate country, region and city &mdash; sets
+            {' '}<strong>no cookies</strong>, and the data stays on our own server; it is never shared with Google or anyone
+            else. Your browser loads it from SC Feed itself (<code>/api/u/</code>), and SC Feed passes your IP to it only
+            so it can work out that location; Umami does not store the IP.
           </p>
         </Section>
 
