@@ -207,6 +207,10 @@ export async function handleInteraction(i: Interaction, rest: REST, allowlist: s
     if (i.isRepliable()) await i.reply({ ...ephemeral, content: 'You need **Manage Server** to change SC Feed settings.' })
     return
   }
+  if (i.isChatInputCommand() || i.isMessageComponent()) {
+    const what = i.isChatInputCommand() ? `/feed ${i.options.getSubcommand()}` : i.customId
+    console.log(new Date().toISOString(), '[commands]', `${what} in ${i.guildId} by ${i.user.id}`)
+  }
   try {
     if (i.isChatInputCommand() && i.commandName === 'feed') await onCommand(i, rest)
     else if (i.isStringSelectMenu() && i.customId.startsWith('feed:cats:')) await onSelect(i)

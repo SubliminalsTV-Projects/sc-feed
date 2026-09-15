@@ -57,6 +57,7 @@ export const state = feedbot.table('state', {
 // Idempotent DDL, applied at startup. Mirrors the Drizzle definitions above — keep in step.
 export async function migrate() {
   await sql.unsafe(`
+    SET client_min_messages = warning;  -- silence "already exists, skipping" on every boot
     CREATE TABLE IF NOT EXISTS feedbot.subscriptions (
       id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       guild_id    text NOT NULL,
