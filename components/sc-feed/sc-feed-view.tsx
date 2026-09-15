@@ -38,6 +38,7 @@ import { SettingsPanel } from './sc-feed-settings'
 import { FeedGrid, legacyToGrid, withPositions } from './sc-feed-grid'
 import { NotificationsFab, NotificationsPanel, useNotifications } from './sc-feed-notifications'
 import { CookieBanner } from './sc-feed-cookie-banner'
+import { PrefsSync } from './sc-feed-prefs-sync'
 import { GithubWidget } from './sc-feed-github-widget'
 import { PatchNotesModal } from './sc-feed-patch-notes'
 import { SupportModal } from './sc-feed-support-modal'
@@ -99,7 +100,14 @@ const ChannelFeedColumn = memo(function ChannelFeedColumn({
   )
 })
 
+// The previous visit's timestamp, read once per page load (see the mount effect).
+let visitLastSeen: string | null | undefined
+
 export function ScFeedView() {
+  return <PrefsSync><ScFeedApp /></PrefsSync>
+}
+
+function ScFeedApp() {
   const [channels, setChannels] = useState<FeedChannel[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -502,9 +510,13 @@ export function ScFeedView() {
   }, [])
 
   useEffect(() => {
-    const stored = localStorage.getItem('sc-feed-last-seen')
-    setLastSeen(stored)
-    localStorage.setItem('sc-feed-last-seen', new Date().toISOString())
+    // Once per page load, not per mount: account sync can remount the app, and stamping again
+    // would wipe the "new since your last visit" dots.
+    if (visitLastSeen === undefined) {
+      visitLastSeen = localStorage.getItem('sc-feed-last-seen')
+      localStorage.setItem('sc-feed-last-seen', new Date().toISOString())
+    }
+    setLastSeen(visitLastSeen)
     setShowTabBar(localStorage.getItem('sc-feed-show-tabbar') === 'true')
     const storedPref = (localStorage.getItem('sc-feed-theme') as 'dark' | 'light' | 'system' | null) ?? 'system'
     setThemePrefState(storedPref)

@@ -296,3 +296,21 @@ html.light .kb-diff del { color: rgb(185 28 28); }
 .sc-feed-grid .react-grid-item > .react-resizable-handle::after {
   border-color: var(--mc-primary-container);
 }
+/* Side grips span the whole edge (the library draws a 20px square at the midpoint), so an edge
+   can be grabbed anywhere along it. A thin amber line shows on hover instead of the corner mark.
+   The doubled .react-resizable-handle class out-ranks the library's own rules, which load later. */
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e,
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-w {
+  top: 12px; bottom: 12px; height: auto; margin-top: 0; width: 10px; transform: none;
+}
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+  left: 12px; right: 12px; width: auto; margin-left: 0; height: 10px; transform: none;
+}
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after,
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-w::after,
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after {
+  border: 0; background: var(--mc-primary-container); opacity: 0.6;
+}
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after { inset: 0 2px 0 auto; width: 2px; height: auto; }
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-w::after { inset: 0 auto 0 2px; width: 2px; height: auto; }
+.sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after { inset: auto 0 2px 0; height: 2px; width: auto; }
