@@ -23,7 +23,7 @@ import { useSession, signOut } from 'next-auth/react'
 import { Loader2, LogIn, LogOut, Menu, Moon, RefreshCw, Search, ShieldCheck, Sun, User, X } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
 import {
-  COLUMN_WIDTHS, DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext, SaveActionsContext,
+  DEFAULT_ENABLED_TRACKER_KEYS, DEFAULT_PRESETS, FeedPrefsContext, SaveActionsContext,
   LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_UNIFIED_ID, OMNI_FEED_ID, REFRESH_INTERVAL_MS,
   YT_CREATORS_ID, TWITCH_CREATORS_ID, CUSTOM_RSS_ID, SAVED_ID,
   USER_YT_KEY, USER_TWITCH_KEY, USER_RSS_KEY,
@@ -35,6 +35,7 @@ import {
 import { getFeedLabel, timeAgo } from './sc-feed-utils'
 import { ChannelFeed, UnifiedMotdFeed, UnifiedOmniFeed } from './sc-feed-channel'
 import { SettingsPanel } from './sc-feed-settings'
+import { FeedGrid, legacyToGrid, withPositions, type GridLayout } from './sc-feed-grid'
 import { NotificationsFab, NotificationsPanel, useNotifications } from './sc-feed-notifications'
 import { CookieBanner } from './sc-feed-cookie-banner'
 import { GithubWidget } from './sc-feed-github-widget'
@@ -125,6 +126,8 @@ export function ScFeedView() {
   const [columnWidths, setColumnWidths] = useState<Record<string, ColumnWidth>>({})
   const [columnHeights, setColumnHeights] = useState<Record<string, ColumnHeight>>({})
   const [columnOrder, setColumnOrder] = useState<string[] | null>(null)
+  // Desktop grid tiles. null = never arranged on the grid yet → derived from the old column fields.
+  const [gridLayout, setGridLayout] = useState<GridLayout | null>(null)
   const [showTabBar, setShowTabBar] = useState(false)
   const [globalSearch, setGlobalSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -148,7 +151,6 @@ export function ScFeedView() {
   const unreadOverridesRef = useRef<Set<string>>(new Set())
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const colRefs = useRef<Map<string, HTMLElement>>(new Map())
   const channelsRef = useRef<FeedChannel[]>([])
   // Per-user Saved bookmarks: URLs the signed-in user has saved, for the card save toggle.
   const [savedUrls, setSavedUrls] = useState<Set<string>>(new Set())
@@ -554,6 +556,10 @@ export function ScFeedView() {
       else setColumnHeights(defaultPreset.columnHeights as Record<string, ColumnHeight>)
     } catch { setColumnHeights(defaultPreset.columnHeights as Record<string, ColumnHeight>) }
     try {
+      const grid = localStorage.getItem('sc-feed-grid-layout')
+      if (grid) setGridLayout(JSON.parse(grid))
+    } catch { /* keep default */ }
+    try {
       const presets = localStorage.getItem('sc-feed-layout-presets')
       if (presets) setLayoutPresets(JSON.parse(presets))
     } catch { /* keep default */ }
@@ -678,6 +684,16 @@ export function ScFeedView() {
       const updated: Record<string, ColumnHeight> = { ...prev, [id]: h }
       try { localStorage.setItem('sc-feed-column-heights', JSON.stringify(updated)) } catch { /* ignore */ }
       return updated
+    })
+  }, [])
+
+  // Merge, don't replace: the grid only reports visible tiles, and a hidden panel keeps its
+  // spot for when it is shown again.
+  const updateGrid = useCallback((next: GridLayout) => {
+    setGridLayout(prev => {
+      const merged = { ...(prev ?? {}), ...next }
+      try { localStorage.setItem('sc-feed-grid-layout', JSON.stringify(merged)) } catch { /* ignore */ }
+      return merged
     })
   }, [])
 
@@ -929,38 +945,12 @@ export function ScFeedView() {
   const effectiveMobileFeed =
     orderedColumns.find(c => c.id === mobileActiveFeed)?.id ?? orderedColumns[0]?.id ?? null
 
-  // Overflow-aware slot grouping: start a new slot when adding would exceed 100% height
-  const slots = useMemo(() => {
-    const result: (typeof orderedColumns)[] = []
-    let i = 0
-    while (i < orderedColumns.length) {
-      const cur = orderedColumns[i]
-      if (cur.colHeight === 'full') {
-        result.push([cur]); i++
-      } else {
-        const group: typeof orderedColumns = []
-        let totalFrac = 0
-        let j = i
-        while (j < orderedColumns.length && orderedColumns[j].colHeight !== 'full') {
-          const col = orderedColumns[j]
-          const frac = col.colHeight === 'third' ? 1 / 3 : col.colHeight === 'quarter' ? 0.25 : 0.5
-          if (totalFrac + frac > 1.01) break
-          group.push(col); totalFrac += frac; j++
-        }
-        if (group.length === 0) { result.push([cur]); i++ }
-        else { result.push(group); i = j }
-      }
-    }
-    return result
-  }, [orderedColumns])
-
-  const totalMinWidth = useMemo(() =>
-    slots.reduce((sum, slot) => {
-      const slotW = Math.max(...slot.map(c => COLUMN_WIDTHS[c.colWidth]))
-      return sum + slotW + 12
-    }, 0),
-    [slots]
+  const gridIds = useMemo(() => orderedColumns.map(c => c.id), [orderedColumns])
+  const effectiveGrid = useMemo(
+    () => withPositions(gridLayout ?? legacyToGrid(gridIds, columnWidths, columnHeights), gridIds),
+    [gridLayout, gridIds, columnWidths, columnHeights],
   )
+  const colById = useMemo(() => new Map(orderedColumns.map(c => [c.id, c])), [orderedColumns])
 
   // Stable per-column width/height setters — recomputed only when orderedColumns changes,
   // not on every ScFeedView state update (e.g. settingsOpen, read state, search).
@@ -1347,8 +1337,6 @@ export function ScFeedView() {
               key={col.id}
               onClick={() => {
                 setMobileActiveFeed(col.id)
-                const el = colRefs.current.get(col.id)
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' })
               }}
               className={`px-3 py-2.5 text-[10px] font-label font-black uppercase tracking-widest whitespace-nowrap transition-colors shrink-0 border-b-2 ${isActive
                   ? 'text-primary-container border-primary-container'
@@ -1369,31 +1357,14 @@ export function ScFeedView() {
             </div>
           ) : (
             <>
-              {/* Desktop: horizontal scroll columns */}
-              <div className="hidden md:block h-full overflow-x-auto">
-                <div className="flex gap-3 h-full px-3 py-3 justify-center" style={{ minWidth: `${totalMinWidth}px` }}>
-                  {slots.map(slot => (
-                    <div key={slot[0].id} className="flex flex-col shrink-0 gap-3">
-                      {slot.map(col => {
-                        const frac = col.colHeight === 'quarter' ? 0.25 : col.colHeight === 'third' ? 1 / 3 : col.colHeight === 'half' ? 0.5 : 1
-                        const gapTax = slot.length > 1 ? ((slot.length - 1) * 12) / slot.length : 0
-                        const itemH = slot.length === 1 && col.colHeight === 'full'
-                          ? '100%'
-                          : `calc(${(frac * 100).toFixed(4)}% - ${gapTax.toFixed(2)}px)`
-                        const colPx = COLUMN_WIDTHS[col.colWidth]
-                        return (
-                          <div key={col.id}
-                            ref={el => { if (el) colRefs.current.set(col.id, el) }}
-                            className="flex flex-col rounded-xl border border-outline-variant/25 bg-surface-container-low/60 overflow-hidden"
-                            style={{ width: `${colPx}px`, height: itemH }}
-                          >
-                            {renderCol(col)}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
+              {/* Desktop: dashboard grid — drag tiles by the header, resize from the edges */}
+              <div className="hidden md:block h-full">
+                <FeedGrid
+                  ids={gridIds}
+                  layout={effectiveGrid}
+                  onLayoutChange={updateGrid}
+                  renderTile={id => { const col = colById.get(id); return col ? renderCol(col) : null }}
+                />
               </div>
 
               {/* Mobile: single active feed */}

@@ -284,3 +284,15 @@ html, body {
 .kb-diff del { background-color: rgb(239 68 68 / 0.18); color: rgb(252 165 165); border-radius: 3px; padding: 0 2px; }
 html.light .kb-diff ins { color: rgb(21 128 61); }
 html.light .kb-diff del { color: rgb(185 28 28); }
+
+/* Dashboard grid (sc-feed-grid.tsx) — theme the library's drop preview and resize grips. */
+.sc-feed-grid .react-grid-item.react-grid-placeholder {
+  background: var(--mc-primary-container);
+  opacity: 0.15;
+  border-radius: 0.75rem;
+}
+.sc-feed-grid .sc-drag-handle { cursor: grab; }
+.sc-feed-grid .react-draggable-dragging .sc-drag-handle { cursor: grabbing; }
+.sc-feed-grid .react-grid-item > .react-resizable-handle::after {
+  border-color: var(--mc-primary-container);
+}

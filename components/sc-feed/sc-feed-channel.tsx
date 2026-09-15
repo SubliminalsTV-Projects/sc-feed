@@ -341,7 +341,7 @@ export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCateg
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
+      <div className="sc-drag-handle shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
         <div
           onClick={() => setDescOpen(o => !o)}
           className="px-4 py-3 flex items-center gap-2 cursor-pointer hover:bg-surface-container/30 transition-colors"
@@ -521,7 +521,7 @@ export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
+      <div className="sc-drag-handle shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
         <div
           onClick={() => setDescOpen(o => !o)}
           className="px-4 py-3 flex items-center gap-2 cursor-pointer hover:bg-surface-container/30 transition-colors"
@@ -700,7 +700,7 @@ export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
     <div className="flex flex-col h-full">
 
       {/* Header */}
-      <div className="shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
+      <div className="sc-drag-handle shrink-0 border-b border-outline-variant/30 bg-surface-container/40">
         <div
           onClick={() => setDescOpen(o => !o)}
           className="px-4 py-3 flex items-center gap-2 cursor-pointer hover:bg-surface-container/30 transition-colors"
