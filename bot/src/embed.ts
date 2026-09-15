@@ -23,7 +23,10 @@ const isHttp = (u: string) => /^https?:\/\//i.test(u)
 
 function clip(text: string, max: number): string {
   if (text.length <= max) return text
-  return text.slice(0, max).replace(/\s+\S*$/, '') + '…'
+  let out = text.slice(0, max).replace(/\s+\S*$/, '') + '…'
+  // A cut inside **bold** or ~~strike~~ would leave the marker showing as literal text.
+  for (const m of ['**', '~~']) if (out.split(m).length % 2 === 0) out += m
+  return out
 }
 
 function unescapeHtml(s: string): string {
@@ -45,9 +48,11 @@ function description(row: MessageRow, kb: KbInfo | null): string {
     return clip(`**What changed** (${kb.summary} words)\n${kbPreviewToMarkdown(kb.previewHtml)}`, DESCRIPTION_MAX)
   }
   let body = (row.body ?? '').trim()
-  // Tweets and some relays repeat the title as the body's first line.
+  // Tweets and some relays repeat the title as the body's first line. Only drop it when the
+  // title is the whole first phrase — a title that is a truncated prefix (MOTD titles are the
+  // first 150 chars) would otherwise cut the body mid-word.
   const title = row.title.trim()
-  if (title && body.startsWith(title)) body = body.slice(title.length).trim()
+  if (title && body.startsWith(title) && /^(\s|$)/.test(body.slice(title.length))) body = body.slice(title.length).trim()
   return clip(body, DESCRIPTION_MAX)
 }
 
@@ -59,12 +64,17 @@ export function buildPost(row: MessageRow, source: Source, kb: KbInfo | null) {
 
   const embed = new EmbedBuilder()
     .setColor(categoryById.get(source.category)!.color)
-    .setAuthor({ name: author.slice(0, 256) })
-    .setTitle(clip(row.title.trim() || source.label, 256))
     .setTimestamp(row.tsRaw)
     .setFooter({ text: source.credit ? `SC Feed · ${source.credit}` : 'SC Feed', iconURL: ICON_URL })
-  if (isHttp(row.url)) embed.setURL(row.url)
-  const desc = description(row, kb)
+  // A MOTD is one block of text with no headline (its stored title is just the first 150
+  // chars), so it gets no title: the author line names it and the body carries it whole.
+  const untitled = source.category === 'motd'
+  embed.setAuthor({ name: author.slice(0, 256), ...(untitled && isHttp(row.url) ? { url: row.url } : {}) })
+  if (!untitled) {
+    embed.setTitle(clip(row.title.trim() || source.label, 256))
+    if (isHttp(row.url)) embed.setURL(row.url)
+  }
+  const desc = untitled ? clip((row.body || row.title).trim(), DESCRIPTION_MAX) : description(row, kb)
   if (desc) embed.setDescription(desc)
   if (isHttp(row.image)) embed.setImage(row.image)
 
