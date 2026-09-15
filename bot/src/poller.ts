@@ -105,9 +105,16 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
   }))
 }
 
-function roleMention(sub: Subscription) {
-  return sub.roleId
-    ? { content: `<@&${sub.roleId}>`, allowed_mentions: { parse: [], roles: [sub.roleId] } }
+// The category's own role if set ('' = muted), else the channel's default role.
+export function pingRole(sub: Pick<Subscription, 'roleId' | 'categoryRoles'>, category: CategoryId): string | null {
+  const own = sub.categoryRoles[category]
+  return (own !== undefined ? own : sub.roleId) || null
+}
+
+function roleMention(sub: Subscription, category: CategoryId) {
+  const role = pingRole(sub, category)
+  return role
+    ? { content: `<@&${role}>`, allowed_mentions: { parse: [], roles: [role] } }
     : { allowed_mentions: { parse: [] } }
 }
 
@@ -149,7 +156,7 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
       .onConflictDoNothing().returning({ id: deliveries.id })
     if (!claim.length) return
     try {
-      const res = await rest.post(Routes.channelMessages(sub.channelId), { body: { ...payload, ...roleMention(sub) } }) as { id: string }
+      const res = await rest.post(Routes.channelMessages(sub.channelId), { body: { ...payload, ...roleMention(sub, source.category) } }) as { id: string }
       await db.update(deliveries).set({ discordMessageId: res.id }).where(eq(deliveries.id, claim[0].id))
       if (sub.errorCount) {
         await db.update(subscriptions).set({ errorCount: 0, lastError: '', updated: new Date() }).where(eq(subscriptions.id, sub.id))

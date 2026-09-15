@@ -2,7 +2,7 @@
 // `feedbot_app` owns this schema and only has SELECT on the scfeed tables it reads —
 // see bot/README.md for the one-time role setup.
 
-import { pgSchema, bigint, text, integer, boolean, timestamp, unique, index } from 'drizzle-orm/pg-core'
+import { pgSchema, bigint, text, integer, boolean, timestamp, unique, index, jsonb } from 'drizzle-orm/pg-core'
 import { sql } from '../../lib/db'
 
 const feedbot = pgSchema('feedbot')
@@ -15,7 +15,9 @@ export const subscriptions = feedbot.table('subscriptions', {
   guildId:    text('guild_id').notNull(),
   channelId:  text('channel_id').notNull().unique(),
   categories: text('categories').array().notNull(),
-  roleId:     text('role_id'),
+  roleId:     text('role_id'),   // default ping for every category ("All")
+  // Per-category overrides: category → role id, or '' for "no ping". A missing key uses roleId.
+  categoryRoles: jsonb('category_roles').$type<Record<string, string>>().notNull().default({}),
   paused:     boolean('paused').notNull().default(false),
   errorCount: integer('error_count').notNull().default(0),
   lastError:  text('last_error').notNull().default(''),
@@ -72,6 +74,7 @@ export async function migrate() {
       updated     timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS subscriptions_guild_idx ON feedbot.subscriptions (guild_id);
+    ALTER TABLE feedbot.subscriptions ADD COLUMN IF NOT EXISTS category_roles jsonb NOT NULL DEFAULT '{}'::jsonb;
 
     CREATE TABLE IF NOT EXISTS feedbot.deliveries (
       id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

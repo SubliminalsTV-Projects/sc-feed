@@ -20,7 +20,7 @@ and the cross-source dedupe key.
 |---|---|
 | `src/index.ts` | Client, events (join/leave/channel delete), shutdown |
 | `src/poller.ts` | Cursor loop, fan-out, dedupe, test posts |
-| `src/commands.ts` | `/feed setup · role · test · remove · status`, category picker |
+| `src/commands.ts` | `/feed setup · role · test · remove · status`, category picker. `/feed role` sets a default role or a per-category one (or mutes a category). Up to 5 channels per server. |
 | `src/embed.ts` | Row → embed + "Open in SC Feed" button |
 | `src/sources.ts` | Which scfeed channels are carried, and their categories and colours |
 | `src/schema.ts` | `feedbot.*` tables (Drizzle) + idempotent startup DDL |

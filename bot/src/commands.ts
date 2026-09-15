@@ -1,7 +1,9 @@
 // /feed slash commands. Server-side setup only — Manage Server required, guilds only.
 //
 //   /feed setup channel [role]   create or edit a news channel, then pick categories
-//   /feed role channel [role]    set or clear the role pinged on each post
+//   /feed role channel [category] [role] [mute]
+//                                set the role pinged on each post — for every category, or
+//                                just one (overrides the default; mute = no ping for it)
 //   /feed test channel           post the newest item so admins see what it looks like
 //   /feed remove channel         stop posting there
 //   /feed status                 list this server's news channels
@@ -19,7 +21,7 @@ import { CATEGORIES, CATEGORY_IDS, categoryById, type CategoryId } from './sourc
 import { sendTestPost } from './poller'
 import { SITE_URL } from './embed'
 
-const MAX_CHANNELS_PER_GUILD = 3
+const MAX_CHANNELS_PER_GUILD = 5
 const BRAND_COLOR = 0x0ea5e9
 const REQUIRED = [
   [PermissionFlagsBits.ViewChannel, 'View Channel'],
@@ -42,9 +44,12 @@ export const commandData = new SlashCommandBuilder()
   .addSubcommand(s => s.setName('setup').setDescription('Post news in a channel, or change what it gets')
     .addChannelOption(channelOpt)
     .addRoleOption(o => o.setName('role').setDescription('Optional role to ping on each post')))
-  .addSubcommand(s => s.setName('role').setDescription('Set or clear the role pinged on each post')
+  .addSubcommand(s => s.setName('role').setDescription('Choose which role each post pings, for all categories or one')
     .addChannelOption(channelOpt)
-    .addRoleOption(o => o.setName('role').setDescription('Leave empty to stop pinging')))
+    .addStringOption(o => o.setName('category').setDescription('Leave empty to set the default for every category')
+      .addChoices({ name: 'All categories (default)', value: 'all' }, ...CATEGORIES.map(c => ({ name: c.label, value: c.id }))))
+    .addRoleOption(o => o.setName('role').setDescription('Leave empty to clear (a category then uses the default)'))
+    .addBooleanOption(o => o.setName('mute').setDescription('Never ping for this category, even if there is a default')))
   .addSubcommand(s => s.setName('test').setDescription('Post the newest item so you can see what it looks like')
     .addChannelOption(channelOpt))
   .addSubcommand(s => s.setName('remove').setDescription('Stop posting news in a channel')
@@ -71,7 +76,11 @@ function roleWarning(channel: GuildBasedChannel, role: Role | null): string {
 function describeSub(sub: Subscription): string {
   const cats = sub.categories.map(c => categoryById.get(c as CategoryId)?.label ?? c).join(', ')
   const lines = [`**<#${sub.channelId}>** — ${cats}`]
-  if (sub.roleId) lines.push(`Pings <@&${sub.roleId}>`)
+  const overrides = Object.entries(sub.categoryRoles)
+    .map(([c, r]) => `${categoryById.get(c as CategoryId)?.label ?? c} → ${r ? `<@&${r}>` : 'no ping'}`)
+  if (sub.roleId || overrides.length) {
+    lines.push(`Pings: ${sub.roleId ? `<@&${sub.roleId}> (default)` : 'none by default'}${overrides.length ? ` · ${overrides.join(' · ')}` : ''}`)
+  }
   if (sub.paused) lines.push(`⏸️ Paused after repeated errors: \`${sub.lastError}\`. Fix the permissions, then run \`/feed setup\` again.`)
   return lines.join('\n')
 }
@@ -158,8 +167,24 @@ async function onCommand(i: ChatInputCommandInteraction<'cached'>, rest: REST) {
 
   if (sub === 'role') {
     const role = i.options.getRole('role')
-    await db.update(subscriptions).set({ roleId: role?.id ?? null, updated: new Date() }).where(eq(subscriptions.id, existing.id))
-    await i.reply({ ...ephemeral, content: (role ? `Posts in ${channel} will ping ${role}.` : `Posts in ${channel} won't ping anyone.`) + roleWarning(channel, role) })
+    const mute = i.options.getBoolean('mute') ?? false
+    const cat = (i.options.getString('category') ?? 'all') as CategoryId | 'all'
+    let content: string
+    if (cat === 'all') {
+      await db.update(subscriptions).set({ roleId: role?.id ?? null, updated: new Date() }).where(eq(subscriptions.id, existing.id))
+      content = role ? `Posts in ${channel} ping ${role} by default.` : `Posts in ${channel} no longer ping a default role.`
+    } else {
+      const label = categoryById.get(cat)!.label
+      const categoryRoles = { ...existing.categoryRoles }
+      if (mute) categoryRoles[cat] = ''
+      else if (role) categoryRoles[cat] = role.id
+      else delete categoryRoles[cat]
+      await db.update(subscriptions).set({ categoryRoles, updated: new Date() }).where(eq(subscriptions.id, existing.id))
+      content = mute ? `${label} posts in ${channel} won't ping anyone.`
+        : role ? `${label} posts in ${channel} ping ${role}.`
+        : `${label} posts in ${channel} use the default ping${existing.roleId ? ` (<@&${existing.roleId}>)` : ' (none set)'}.`
+    }
+    await i.reply({ ...ephemeral, content: content + (mute ? '' : roleWarning(channel, role)), allowedMentions: { parse: [] } })
   } else if (sub === 'test') {
     await i.deferReply(ephemeral)
     try {

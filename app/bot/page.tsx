@@ -40,7 +40,7 @@ export default function BotLandingPage() {
         <p>After adding the bot, someone with <strong>Manage Server</strong> runs:</p>
         <ul>
           <li><code>/feed setup channel:#news</code>: start posting in a channel, then pick categories</li>
-          <li><code>/feed role</code>: ping a role on each post (optional; the role must be mentionable)</li>
+          <li><code>/feed role</code>: ping a role on each post, or a different role per category (optional; roles must be mentionable)</li>
           <li><code>/feed test</code>: post the newest item so you can see what it looks like</li>
           <li><code>/feed status</code> and <code>/feed remove</code></li>
         </ul>

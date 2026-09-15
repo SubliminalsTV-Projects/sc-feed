@@ -22,7 +22,7 @@ export default function BotPrivacyPage() {
         <ul>
           <li><strong>Your server</strong>: its ID and name, and when the bot joined or was removed.</li>
           <li>
-            <strong>News channel settings</strong>: the channel ID, the categories you picked, the role to ping (if any),
+            <strong>News channel settings</strong>: the channel ID, the categories you picked, the roles to ping (if any, per category),
             and the ID of the person who ran <code>/feed setup</code>.
           </li>
           <li>
