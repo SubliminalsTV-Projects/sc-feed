@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ChevronRight, ClipboardPaste, Copy, Download, Eye, EyeOff, GripVertical, Heart, Info, LayoutTemplate, Loader2, Monitor, Moon, Palette, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, User, Volume2, VolumeX, X, Youtube } from 'lucide-react'
+import { Bell, BellOff, BellRing, BookmarkPlus, CheckCheck, Check, ChevronDown, ChevronRight, ClipboardPaste, Copy, Download, Eye, EyeOff, Heart, Info, LayoutTemplate, Loader2, Monitor, Moon, Palette, Plus, Rss, RotateCcw, Save, Send, Sparkles, Sun, Trash2, Tv, User, Volume2, VolumeX, X, Youtube } from 'lucide-react'
 import { CURRENT_VERSION } from '@/lib/patch-notes'
 import type { FeedChannel } from '@/app/api/sc-feed/route'
 import { type LayoutPreset, type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed, MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS, NOTIF_MUTED_KEY, NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT } from './sc-feed-types'
@@ -57,7 +57,6 @@ function AccountAvatar({ account }: { account: { image: string | null } }) {
 export function SettingsPanel({
   channels,
   columnOrder,
-  onReorder,
   hiddenChannels, onToggleChannel,
   leaksRevealed, onToggleLeaks,
   showTabBar, onToggleTabBar,
@@ -77,7 +76,6 @@ export function SettingsPanel({
 }: {
   channels: FeedChannel[]
   columnOrder: string[] | null
-  onReorder: (newOrder: string[]) => void
   hiddenChannels: Set<string>; onToggleChannel: (id: string) => void
   leaksRevealed: boolean; onToggleLeaks: () => void
   showTabBar: boolean; onToggleTabBar: () => void
@@ -119,8 +117,6 @@ export function SettingsPanel({
 }) {
   const order = columnOrder ?? []
   const [markedAllRead, setMarkedAllRead] = useState(false)
-  const [draggedId, setDraggedId] = useState<string | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetNameInput, setPresetNameInput] = useState('')
   const [importing, setImporting] = useState(false)
@@ -165,19 +161,6 @@ export function SettingsPanel({
   const setVolumePref = (v: number) => {
     setVolume(v)
     try { localStorage.setItem(NOTIF_VOLUME_KEY, String(v)) } catch { /* ignore */ }
-  }
-
-  function handleDrop(targetId: string) {
-    if (!draggedId || draggedId === targetId) return
-    const next = [...order]
-    const from = next.indexOf(draggedId)
-    const to = next.indexOf(targetId)
-    if (from < 0 || to < 0) return
-    next.splice(from, 1)
-    next.splice(to, 0, draggedId)
-    onReorder(next)
-    setDraggedId(null)
-    setDragOverId(null)
   }
 
   return (
@@ -501,31 +484,17 @@ export function SettingsPanel({
           </div>
         )}
 
-        <SubLabel>Feed order</SubLabel>
+        <SubLabel>Feeds</SubLabel>
         <div className="space-y-1.5">
           {order.map(id => {
             const label = getFeedLabel(id, channels)
             const visible = !hiddenChannels.has(id)
-            const isDragging = draggedId === id
-            const isDragOver = dragOverId === id && !isDragging
 
             return (
               <div
                 key={id}
-                draggable
-                onDragStart={() => setDraggedId(id)}
-                onDragEnd={() => { setDraggedId(null); setDragOverId(null) }}
-                onDragOver={e => { e.preventDefault(); setDragOverId(id) }}
-                onDrop={() => handleDrop(id)}
-                className={`flex items-center gap-1.5 px-1.5 py-2 rounded-lg border transition-all select-none ${
-                  isDragOver
-                    ? 'border-primary-container/50 bg-primary-container/5'
-                    : 'border-outline-variant/20 bg-surface-container-high/30'
-                } ${isDragging ? 'opacity-40' : ''}`}
+                className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-outline-variant/20 bg-surface-container-high/30 select-none"
               >
-                <div className="shrink-0 text-on-surface-variant/20 hover:text-on-surface-variant/50 transition-colors cursor-grab">
-                  <GripVertical className="w-3.5 h-3.5" />
-                </div>
                 <span className={`flex-1 text-[12px] font-label font-black truncate ${visible ? 'text-on-surface' : 'text-on-surface-variant/25 line-through'}`}>
                   {label}
                 </span>

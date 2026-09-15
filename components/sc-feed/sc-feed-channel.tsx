@@ -7,7 +7,7 @@ import {
   Eye, EyeOff, MoreHorizontal, RotateCcw, Rss, Sparkles, X,
 } from 'lucide-react'
 import type { FeedChannel, FeedMessage } from '@/app/api/sc-feed/route'
-import { ALL_TRACKER_KEYS, CUSTOM_RSS_ID, FEED_DESCRIPTIONS, LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_LOBBY_URLS, PILL, SAVED_ID, TRACKER_CATS, TWITCH_CREATORS_ID, YT_CREATORS_ID, useFeedPrefs, type ColumnHeight, type ColumnWidth } from './sc-feed-types'
+import { ALL_TRACKER_KEYS, CUSTOM_RSS_ID, FEED_DESCRIPTIONS, LEAKS_CHANNEL_ID, MOTD_CHANNEL_IDS, MOTD_LOBBY_URLS, PILL, SAVED_ID, TRACKER_CATS, TWITCH_CREATORS_ID, YT_CREATORS_ID, useFeedPrefs } from './sc-feed-types'
 import { formatLocalTime, getTrackerCatKey, groupByWindow, timeAgo } from './sc-feed-utils'
 import { GroupedCard, MessageCard } from './sc-feed-message-card'
 import { RsiStatusCard } from './sc-feed-notifications'
@@ -83,7 +83,6 @@ function useShowMotd(): [boolean, (v: boolean) => void] {
 
 type KebabItem =
   | { label: string; icon?: React.ElementType; onClick: () => void; active?: boolean; keepOpen?: boolean }
-  | { type: 'section'; label: string; options: Array<{ label: string; active: boolean; onClick: () => void }> }
   | { type: 'toggleList'; label: string; options: Array<{ key: string; label: string; active: boolean; onClick: () => void; icon?: React.ElementType; iconCls?: string }> }
   | { type: 'separator' }
 
@@ -152,28 +151,6 @@ function KebabMenu({ items }: { items: KebabItem[] }) {
           {items.map((item, i) => {
             if ('type' in item && item.type === 'separator') {
               return <div key={i} className="my-1 border-t border-outline-variant/20" />
-            }
-            if ('type' in item && item.type === 'section') {
-              return (
-                <div key={i} className="px-3 py-1.5">
-                  <p className="text-[9px] font-label font-black uppercase tracking-widest text-on-surface-variant/40 mb-1.5">{item.label}</p>
-                  <div className="flex gap-1">
-                    {item.options.map((opt, j) => (
-                      <button
-                        key={j}
-                        onClick={opt.onClick}
-                        className={`flex-1 py-1 rounded text-[10px] font-label font-black transition-colors border ${
-                          opt.active
-                            ? 'bg-primary-container/15 text-primary-container border-primary-container/30'
-                            : 'bg-surface-container text-on-surface-variant/40 hover:text-on-surface-variant border-transparent'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )
             }
             if ('type' in item && item.type === 'toggleList') {
               return (
@@ -255,7 +232,7 @@ function GhostMessageList({ messages, fading, channelId, lastSeen }: {
   )
 }
 
-export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCategories, globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead, onToggleLeaks, onToggleCategory, colWidth, colHeight, onSetWidth, onSetHeight }: {
+export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCategories, globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead, onToggleLeaks, onToggleCategory }: {
   channel: FeedChannel
   isLeaks: boolean
   revealed: boolean
@@ -268,10 +245,6 @@ export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCateg
   onClearAllRead: () => void
   onToggleLeaks?: () => void
   onToggleCategory: (key: string) => void
-  colWidth: ColumnWidth
-  colHeight: ColumnHeight
-  onSetWidth: (w: ColumnWidth) => void
-  onSetHeight: (h: ColumnHeight) => void
 }) {
   const { dateFormat, hideAllRead } = useFeedPrefs()
   const blurred = isLeaks && !revealed
@@ -375,18 +348,6 @@ export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCateg
             { label: showUnreadOnly ? 'Show all' : 'Hide read', icon: showUnreadOnly ? Eye : EyeOff, onClick: toggleShowUnreadOnly, active: showUnreadOnly },
             { label: reversed ? 'Newest first' : 'Oldest first', icon: ArrowUpDown, onClick: toggleReversed, active: reversed },
             ...(isLeaks && onToggleLeaks ? [{ label: revealed ? 'Blur Leaks' : 'Reveal Leaks', icon: revealed ? EyeOff : Eye, onClick: onToggleLeaks, active: revealed }] : []),
-            { type: 'separator' as const },
-            { type: 'section' as const, label: 'Height', options: [
-              { label: 'Full', active: colHeight === 'full', onClick: () => onSetHeight('full') },
-              { label: 'Half', active: colHeight === 'half', onClick: () => onSetHeight('half') },
-              { label: '1/3', active: colHeight === 'third', onClick: () => onSetHeight('third') },
-              { label: '1/4', active: colHeight === 'quarter', onClick: () => onSetHeight('quarter') },
-            ]},
-            { type: 'section' as const, label: 'Width', options: [
-              { label: 'Narrow', active: colWidth === 'narrow', onClick: () => onSetWidth('narrow') },
-              { label: 'Medium', active: colWidth === 'medium', onClick: () => onSetWidth('medium') },
-              { label: 'Wide', active: colWidth === 'wide', onClick: () => onSetWidth('wide') },
-            ]},
             ...(isTrackerSC ? [
               { type: 'separator' as const },
               ...ALL_TRACKER_KEYS.map(key => ({
@@ -493,7 +454,7 @@ export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCateg
 }
 
 export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
-  messages, globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead, colWidth, colHeight, onSetWidth, onSetHeight,
+  messages, globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead,
 }: {
   messages: Array<FeedMessage & { _channelId: string; _motdLabels: string[] }>
   globalSearch: string
@@ -501,10 +462,6 @@ export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
   onMarkRead: (channelId: string, msgId: string) => void
   onMarkAllRead: () => void
   onClearAllRead: () => void
-  colWidth: ColumnWidth
-  colHeight: ColumnHeight
-  onSetWidth: (w: ColumnWidth) => void
-  onSetHeight: (h: ColumnHeight) => void
 }) {
   const { hideAllRead } = useFeedPrefs()
   const [showUnreadOnly, toggleShowUnreadOnly] = useShowUnreadOnly('motd')
@@ -549,18 +506,6 @@ export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
                 : { label: 'Mark all read', icon: CheckCheck, onClick: onMarkAllRead },
               { label: showUnreadOnly ? 'Show all' : 'Hide read', icon: showUnreadOnly ? Eye : EyeOff, onClick: toggleShowUnreadOnly, active: showUnreadOnly },
               { label: reversed ? 'Newest first' : 'Oldest first', icon: ArrowUpDown, onClick: toggleReversed, active: reversed },
-              { type: 'separator' as const },
-              { type: 'section' as const, label: 'Height', options: [
-                { label: 'Full', active: colHeight === 'full', onClick: () => onSetHeight('full') },
-                { label: 'Half', active: colHeight === 'half', onClick: () => onSetHeight('half') },
-                { label: '1/3', active: colHeight === 'third', onClick: () => onSetHeight('third') },
-                { label: '1/4', active: colHeight === 'quarter', onClick: () => onSetHeight('quarter') },
-              ]},
-              { type: 'section' as const, label: 'Width', options: [
-                { label: 'Narrow', active: colWidth === 'narrow', onClick: () => onSetWidth('narrow') },
-                { label: 'Medium', active: colWidth === 'medium', onClick: () => onSetWidth('medium') },
-                { label: 'Wide', active: colWidth === 'wide', onClick: () => onSetWidth('wide') },
-              ]},
             ]} />
           </div>
         </div>
@@ -597,7 +542,7 @@ export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
 
 export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
   channels, enabledCategories, leaksRevealed, lastSeen, motdMessages,
-  globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead, colWidth, colHeight, onSetWidth, onSetHeight,
+  globalSearch, isReadMsg, onMarkRead, onMarkAllRead, onClearAllRead,
   omniSourceToggles, onToggleOmniSource, onToggleCategory,
 }: {
   channels: FeedChannel[]
@@ -610,10 +555,6 @@ export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
   onMarkRead: (channelId: string, msgId: string) => void
   onMarkAllRead: () => void
   onClearAllRead: () => void
-  colWidth: ColumnWidth
-  colHeight: ColumnHeight
-  onSetWidth: (w: ColumnWidth) => void
-  onSetHeight: (h: ColumnHeight) => void
   omniSourceToggles: Record<string, boolean>
   onToggleOmniSource: (id: string) => void
   onToggleCategory: (key: string) => void
@@ -747,18 +688,6 @@ export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
                   onClick: () => onToggleCategory(key),
                 }
               }) },
-              { type: 'separator' as const },
-              { type: 'section' as const, label: 'Height', options: [
-                { label: 'Full', active: colHeight === 'full', onClick: () => onSetHeight('full') },
-                { label: 'Half', active: colHeight === 'half', onClick: () => onSetHeight('half') },
-                { label: '1/3', active: colHeight === 'third', onClick: () => onSetHeight('third') },
-                { label: '1/4', active: colHeight === 'quarter', onClick: () => onSetHeight('quarter') },
-              ]},
-              { type: 'section' as const, label: 'Width', options: [
-                { label: 'Narrow', active: colWidth === 'narrow', onClick: () => onSetWidth('narrow') },
-                { label: 'Medium', active: colWidth === 'medium', onClick: () => onSetWidth('medium') },
-                { label: 'Wide', active: colWidth === 'wide', onClick: () => onSetWidth('wide') },
-              ]},
             ]} />
           </div>
         </div>

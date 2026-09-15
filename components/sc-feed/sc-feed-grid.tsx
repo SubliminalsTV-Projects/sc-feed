@@ -11,7 +11,7 @@ import ReactGridLayout, { bottom, cloneLayout, horizontalCompactor, moveElement,
 import { defaultConstraints, type LayoutConstraint } from 'react-grid-layout/core'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
-import { COLUMN_WIDTHS, type ColumnHeight, type ColumnWidth } from './sc-feed-types'
+import { COLUMN_WIDTHS, type ColumnHeight, type ColumnWidth, type GridLayout } from './sc-feed-types'
 
 export const GRID_ROWS = 12
 const GAP = 12
@@ -19,9 +19,6 @@ const COL_W = 28
 const COL_STEP = COL_W + GAP // one grid column = 40px of width
 // Spare columns to the right while a gesture is running, so a pushed tile has somewhere to go.
 const DRAG_SLACK = 16
-
-export interface GridPos { x: number; y: number; w: number; h: number }
-export type GridLayout = Record<string, GridPos>
 
 const ROWS_FOR: Record<ColumnHeight, number> = { full: 12, half: 6, third: 4, quarter: 3 }
 

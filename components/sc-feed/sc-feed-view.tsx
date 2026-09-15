@@ -29,13 +29,13 @@ import {
   USER_YT_KEY, USER_TWITCH_KEY, USER_RSS_KEY,
   NOTIF_MUTED_KEY, NOTIF_VOLUME_KEY, NOTIF_VOLUME_DEFAULT,
   MAX_YT_CHANNELS, MAX_TWITCH_STREAMERS, MAX_RSS_FEEDS,
-  type ColumnHeight, type ColumnWidth, type LayoutPreset,
+  type ColumnHeight, type ColumnWidth, type GridLayout, type LayoutPreset,
   type UserYTChannel, type UserTwitchStreamer, type UserRSSFeed,
 } from './sc-feed-types'
 import { getFeedLabel, timeAgo } from './sc-feed-utils'
 import { ChannelFeed, UnifiedMotdFeed, UnifiedOmniFeed } from './sc-feed-channel'
 import { SettingsPanel } from './sc-feed-settings'
-import { FeedGrid, legacyToGrid, withPositions, type GridLayout } from './sc-feed-grid'
+import { FeedGrid, legacyToGrid, withPositions } from './sc-feed-grid'
 import { NotificationsFab, NotificationsPanel, useNotifications } from './sc-feed-notifications'
 import { CookieBanner } from './sc-feed-cookie-banner'
 import { GithubWidget } from './sc-feed-github-widget'
@@ -49,9 +49,9 @@ import { isEmbedded } from '@/lib/embed'
 // so React never sees it as a new component type.
 const ChannelFeedColumn = memo(function ChannelFeedColumn({
   col, channel, enabledCategories, globalSearch, lastSeen, leaksRevealed, onToggleLeaks, onToggleCategory,
-  isReadGlobal, toggleReadGlobal, markChannelRead, clearChannelRead, onSetWidth, onSetHeight,
+  isReadGlobal, toggleReadGlobal, markChannelRead, clearChannelRead,
 }: {
-  col: { id: string; colWidth: ColumnWidth; colHeight: ColumnHeight }
+  col: { id: string }
   channel: FeedChannel
   enabledCategories: Set<string>
   globalSearch: string
@@ -63,8 +63,6 @@ const ChannelFeedColumn = memo(function ChannelFeedColumn({
   toggleReadGlobal: (channelId: string, msgId: string, tsRaw?: string | null) => void
   markChannelRead: (channelId: string) => void
   clearChannelRead: (channelId: string) => void
-  onSetWidth: (w: ColumnWidth) => void
-  onSetHeight: (h: ColumnHeight) => void
 }) {
   const id = channel.id
   const isReadMsg = useCallback(
@@ -97,10 +95,6 @@ const ChannelFeedColumn = memo(function ChannelFeedColumn({
       onClearAllRead={onClearAllRead}
       onToggleLeaks={onToggleLeaks}
       onToggleCategory={onToggleCategory}
-      colWidth={col.colWidth}
-      colHeight={col.colHeight}
-      onSetWidth={onSetWidth}
-      onSetHeight={onSetHeight}
     />
   )
 })
@@ -556,8 +550,11 @@ export function ScFeedView() {
       else setColumnHeights(defaultPreset.columnHeights as Record<string, ColumnHeight>)
     } catch { setColumnHeights(defaultPreset.columnHeights as Record<string, ColumnHeight>) }
     try {
+      // No grid yet: someone who customised the old column sizes gets those converted (null);
+      // everyone else gets the default preset's tiles.
       const grid = localStorage.getItem('sc-feed-grid-layout')
       if (grid) setGridLayout(JSON.parse(grid))
+      else if (!localStorage.getItem('sc-feed-column-widths') && defaultPreset.grid) setGridLayout(defaultPreset.grid)
     } catch { /* keep default */ }
     try {
       const presets = localStorage.getItem('sc-feed-layout-presets')
@@ -671,22 +668,6 @@ export function ScFeedView() {
     })
   }, [])
 
-  const setColWidth = useCallback((id: string, w: ColumnWidth) => {
-    setColumnWidths(prev => {
-      const updated = { ...prev, [id]: w }
-      try { localStorage.setItem('sc-feed-column-widths', JSON.stringify(updated)) } catch { /* ignore */ }
-      return updated
-    })
-  }, [])
-
-  const setColHeight = useCallback((id: string, h: ColumnHeight) => {
-    setColumnHeights(prev => {
-      const updated: Record<string, ColumnHeight> = { ...prev, [id]: h }
-      try { localStorage.setItem('sc-feed-column-heights', JSON.stringify(updated)) } catch { /* ignore */ }
-      return updated
-    })
-  }, [])
-
   // Merge, don't replace: the grid only reports visible tiles, and a hidden panel keeps its
   // spot for when it is shown again.
   const updateGrid = useCallback((next: GridLayout) => {
@@ -697,18 +678,14 @@ export function ScFeedView() {
     })
   }, [])
 
-  const reorderCols = useCallback((newOrder: string[]) => {
-    setColumnOrder(newOrder)
-    try { localStorage.setItem('sc-feed-column-order', JSON.stringify(newOrder)) } catch { /* ignore */ }
-  }, [])
-
+  // Presets and exports carry the grid. allGridRef (set below) also holds the saved spots of
+  // hidden panels, so showing one again after applying a preset puts it back where it was.
   const saveLayoutPreset = useCallback((name: string) => {
     const preset: LayoutPreset = {
       id: Date.now().toString(),
       name,
       columnOrder: columnOrder ?? [],
-      columnWidths: { ...columnWidths },
-      columnHeights: { ...columnHeights },
+      grid: allGridRef.current,
       hiddenChannels: [...hiddenChannels],
     }
     setLayoutPresets(prev => {
@@ -716,17 +693,22 @@ export function ScFeedView() {
       try { localStorage.setItem('sc-feed-layout-presets', JSON.stringify(next)) } catch { /* ignore */ }
       return next
     })
-  }, [columnOrder, columnWidths, columnHeights, hiddenChannels])
+  }, [columnOrder, hiddenChannels])
 
+  // A preset saved before the grid existed has no `grid`: clearing the grid layout makes the view
+  // derive tiles from its old column sizes instead.
   const applyLayoutPreset = useCallback((preset: LayoutPreset) => {
     setColumnOrder(preset.columnOrder)
-    setColumnWidths(preset.columnWidths)
-    setColumnHeights(preset.columnHeights as Record<string, ColumnHeight>)
+    setColumnWidths(preset.columnWidths ?? {})
+    setColumnHeights(preset.columnHeights ?? {})
+    setGridLayout(preset.grid ?? null)
     setHiddenChannels(new Set(preset.hiddenChannels))
     try {
       localStorage.setItem('sc-feed-column-order', JSON.stringify(preset.columnOrder))
-      localStorage.setItem('sc-feed-column-widths', JSON.stringify(preset.columnWidths))
-      localStorage.setItem('sc-feed-column-heights', JSON.stringify(preset.columnHeights))
+      localStorage.setItem('sc-feed-column-widths', JSON.stringify(preset.columnWidths ?? {}))
+      localStorage.setItem('sc-feed-column-heights', JSON.stringify(preset.columnHeights ?? {}))
+      if (preset.grid) localStorage.setItem('sc-feed-grid-layout', JSON.stringify(preset.grid))
+      else localStorage.removeItem('sc-feed-grid-layout')
       localStorage.setItem('sc-feed-hidden-channels', JSON.stringify(preset.hiddenChannels))
     } catch { /* ignore */ }
   }, [])
@@ -742,27 +724,27 @@ export function ScFeedView() {
   const overwriteLayoutPreset = useCallback((id: string) => {
     setLayoutPresets(prev => {
       const next = prev.map(p => p.id === id ? {
-        ...p,
+        id: p.id,
+        name: p.name,
         columnOrder: columnOrder ?? [],
-        columnWidths: { ...columnWidths },
-        columnHeights: { ...columnHeights },
+        grid: allGridRef.current,
         hiddenChannels: [...hiddenChannels],
       } : p)
       try { localStorage.setItem('sc-feed-layout-presets', JSON.stringify(next)) } catch { /* ignore */ }
       return next
     })
-  }, [columnOrder, columnWidths, columnHeights, hiddenChannels])
+  }, [columnOrder, hiddenChannels])
 
-  // Export the CURRENT live layout as portable JSON (the four LayoutPreset fields). Used to
-  // hand a tuned layout off — e.g. to bake into DEFAULT_PRESETS as the shipped default.
+  // Export the CURRENT live layout as portable JSON. Used to hand a tuned layout off — e.g. to
+  // bake into DEFAULT_PRESETS as the shipped default.
   const exportLayout = useCallback(() => JSON.stringify({
     columnOrder: columnOrder ?? [],
-    columnWidths,
-    columnHeights,
     hiddenChannels: [...hiddenChannels],
-  }, null, 2), [columnOrder, columnWidths, columnHeights, hiddenChannels])
+    grid: allGridRef.current,
+  }, null, 2), [columnOrder, hiddenChannels])
 
-  // Apply a pasted layout JSON. Returns false on malformed input so the UI can flag it.
+  // Apply a pasted layout JSON — grid exports, or old exports with column sizes. Returns false on
+  // malformed input so the UI can flag it.
   const importLayout = useCallback((text: string): boolean => {
     try {
       const p = JSON.parse(text)
@@ -771,8 +753,9 @@ export function ScFeedView() {
         id: 'imported',
         name: 'Imported',
         columnOrder: p.columnOrder,
-        columnWidths: (p.columnWidths ?? {}) as Record<string, ColumnWidth>,
-        columnHeights: (p.columnHeights ?? {}) as Record<string, ColumnHeight>,
+        columnWidths: p.columnWidths as Record<string, ColumnWidth> | undefined,
+        columnHeights: p.columnHeights as Record<string, ColumnHeight> | undefined,
+        grid: p.grid && typeof p.grid === 'object' ? p.grid as GridLayout : undefined,
         hiddenChannels: Array.isArray(p.hiddenChannels) ? p.hiddenChannels : [],
       })
       return true
@@ -922,7 +905,7 @@ export function ScFeedView() {
       .forEach(ch => markChannelRead(ch.id))
   }, [markChannelRead])
 
-  const orderedColumns = useMemo(() =>
+  const visibleColumns = useMemo(() =>
     (columnOrder ?? [])
       .map(id => {
         const isOmni = id === OMNI_FEED_ID
@@ -932,45 +915,37 @@ export function ScFeedView() {
           : isMOTD
             ? motdChannels.length > 0 && !hiddenChannels.has(MOTD_UNIFIED_ID)
             : !hiddenChannels.has(id) && channels.some(c => c.id === id)
-        return {
-          id, isOmni, isMOTD, visible,
-          colWidth: (columnWidths[id] ?? 'medium') as ColumnWidth,
-          colHeight: (columnHeights[id] ?? 'full') as ColumnHeight,
-        }
+        return { id, isOmni, isMOTD, visible }
       })
       .filter(col => col.visible),
-    [columnOrder, hiddenChannels, channels, columnWidths, columnHeights, motdChannels]
+    [columnOrder, hiddenChannels, channels, motdChannels]
   )
 
-  const effectiveMobileFeed =
-    orderedColumns.find(c => c.id === mobileActiveFeed)?.id ?? orderedColumns[0]?.id ?? null
-
-  const gridIds = useMemo(() => orderedColumns.map(c => c.id), [orderedColumns])
+  const gridIds = useMemo(() => visibleColumns.map(c => c.id), [visibleColumns])
   const effectiveGrid = useMemo(
     () => withPositions(gridLayout ?? legacyToGrid(gridIds, columnWidths, columnHeights), gridIds),
     [gridLayout, gridIds, columnWidths, columnHeights],
   )
+  // Every known tile, hidden panels included — what presets and Export save.
+  const allGrid = useMemo(() => ({ ...(gridLayout ?? {}), ...effectiveGrid }), [gridLayout, effectiveGrid])
+  const allGridRef = useRef(allGrid)
+  allGridRef.current = allGrid
+  // Reading order follows the grid — left to right, then top to bottom — for the tab bar, the
+  // phone view and the Settings list.
+  const byGrid = useCallback((a: string, b: string) => {
+    const pa = allGrid[a], pb = allGrid[b]
+    if (!pa || !pb) return pa ? -1 : pb ? 1 : 0
+    return pa.x - pb.x || pa.y - pb.y
+  }, [allGrid])
+  const orderedColumns = useMemo(
+    () => [...visibleColumns].sort((a, b) => byGrid(a.id, b.id)),
+    [visibleColumns, byGrid],
+  )
+  const settingsOrder = useMemo(() => [...(columnOrder ?? [])].sort(byGrid), [columnOrder, byGrid])
   const colById = useMemo(() => new Map(orderedColumns.map(c => [c.id, c])), [orderedColumns])
 
-  // Stable per-column width/height setters — recomputed only when orderedColumns changes,
-  // not on every ScFeedView state update (e.g. settingsOpen, read state, search).
-  const colSetWidthFns = useMemo(() => {
-    const map: Record<string, (w: ColumnWidth) => void> = {}
-    for (const col of orderedColumns) {
-      const id = col.id
-      map[id] = (w: ColumnWidth) => setColWidth(id, w)
-    }
-    return map
-  }, [orderedColumns, setColWidth])
-
-  const colSetHeightFns = useMemo(() => {
-    const map: Record<string, (h: ColumnHeight) => void> = {}
-    for (const col of orderedColumns) {
-      const id = col.id
-      map[id] = (h: ColumnHeight) => setColHeight(id, h)
-    }
-    return map
-  }, [orderedColumns, setColHeight])
+  const effectiveMobileFeed =
+    orderedColumns.find(c => c.id === mobileActiveFeed)?.id ?? orderedColumns[0]?.id ?? null
 
   const renderCol = (col: typeof orderedColumns[number]) => {
     if (col.isOmni) return (
@@ -985,10 +960,6 @@ export function ScFeedView() {
         onMarkRead={toggleReadGlobal}
         onMarkAllRead={markAllReadGlobal}
         onClearAllRead={clearAllReadGlobal}
-        colWidth={col.colWidth}
-        colHeight={col.colHeight}
-        onSetWidth={colSetWidthFns[col.id]}
-        onSetHeight={colSetHeightFns[col.id]}
         omniSourceToggles={omniSourceToggles}
         onToggleOmniSource={toggleOmniSource}
         onToggleCategory={toggleCategory}
@@ -1002,10 +973,6 @@ export function ScFeedView() {
         onMarkRead={toggleReadGlobal}
         onMarkAllRead={motdMarkAllRead}
         onClearAllRead={motdClearAllRead}
-        colWidth={col.colWidth}
-        colHeight={col.colHeight}
-        onSetWidth={colSetWidthFns[col.id]}
-        onSetHeight={colSetHeightFns[col.id]}
       />
     )
     const ch = channels.find(c => c.id === col.id)
@@ -1024,8 +991,6 @@ export function ScFeedView() {
         toggleReadGlobal={toggleReadGlobal}
         markChannelRead={markChannelRead}
         clearChannelRead={clearChannelRead}
-        onSetWidth={colSetWidthFns[col.id]}
-        onSetHeight={colSetHeightFns[col.id]}
       />
     )
   }
@@ -1159,8 +1124,7 @@ export function ScFeedView() {
   }, [persistAndRefetch])
 
   const settingsPanelProps = {
-    channels, columnOrder,
-    onReorder: reorderCols,
+    channels, columnOrder: settingsOrder,
     hiddenChannels, onToggleChannel: toggleChannel,
     leaksRevealed, onToggleLeaks: toggleLeaks,
     showTabBar, onToggleTabBar: toggleTabBar,
