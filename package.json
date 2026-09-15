@@ -9,13 +9,17 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "bot:dev": "tsx bot/src/index.ts",
+    "bot:typecheck": "tsc -p bot",
+    "bot:build": "esbuild bot/src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=bot/dist/index.js --external:zlib-sync --external:bufferutil --external:utf-8-validate --log-level=warning"
   },
   "dependencies": {
     "@next/third-parties": "^15",
     "@tailwindcss/typography": "^0.5.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "discord.js": "^14.27.0",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.511.0",
     "next": "^15.3.1",
@@ -38,6 +42,7 @@
     "@types/turndown": "^5.0.6",
     "@types/web-push": "^3.6.4",
     "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.28.2",
     "playwright": "^1.61.0",
     "tailwindcss": "^4.1.6",
     "tsx": "^4.22.4",
