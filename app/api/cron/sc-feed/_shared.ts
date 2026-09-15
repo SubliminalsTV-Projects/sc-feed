@@ -111,6 +111,15 @@ export function freshCutoff(): string {
   return new Date(Date.now() - 35 * 60 * 1000).toISOString()
 }
 
+/** Non-YouTube messages (and KB diffs) are kept this long. prune deletes anything older, and
+ *  upsertMessage refuses to write it — without that guard every cron cycle re-inserted what
+ *  prune had just deleted (the Discord cron re-reads the latest 50 per channel, which reaches
+ *  past 30 days on quiet channels: ~100 insert+delete pairs every 10 minutes). */
+export const RETENTION_DAYS = 30
+export function retentionCutoff(): Date {
+  return new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)
+}
+
 // ---------- discord parser ----------
 
 export function mergePipelineContinuations(msgs: DiscordMsg[]): DiscordMsg[] {
@@ -610,6 +619,8 @@ export async function upsertMessage(
   // Central chokepoint so every source — Spectrum, Discord, Comm-Link — gets it.
   // Idempotent: already-converted emoji and unknown :tokens: pass through unchanged.
   const tsRaw = new Date(msg.ts_raw)
+  // Never (re)write a row prune would delete — see RETENTION_DAYS. YouTube is exempt from prune.
+  if (tsRaw < retentionCutoff() && !YT_FEEDS.some(f => f.file_id === channelId)) return false
   const values = {
     channelId,
     channelLabel,
@@ -934,7 +945,7 @@ export async function fetchYouTubeRss(newMsgs: NewMsg[], cutoff: string): Promis
 export async function pruneOldMessages() {
   // Age-based prune, but YouTube channels are EXEMPT (kept indefinitely) — which is why
   // this stays an app-level DELETE rather than a blanket Timescale retention policy.
-  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const cutoff = retentionCutoff()
   const ytIds = YT_FEEDS.map(f => f.file_id)
   const deleted = await db.delete(messagesTbl)
     .where(and(lt(messagesTbl.tsRaw, cutoff), notInArray(messagesTbl.channelId, ytIds)))
@@ -1281,7 +1292,7 @@ export async function processKbDiff(parsed: { msg_id: string; title: string; url
 /** Prune KB diff rows older than 30 days (they're orphaned once their message is pruned).
  *  Snapshots are NEVER pruned — they're the baseline for diffing future edits. */
 export async function pruneOldKbDiffs(): Promise<number> {
-  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const cutoff = retentionCutoff()
   const deleted = await db.delete(kbDiffs).where(lt(kbDiffs.created, cutoff)).returning({ id: kbDiffs.id })
   return deleted.length
 }
