@@ -2,12 +2,17 @@
 
 Owner tool. **Chrome is the maintained target** — see "Firefox build (frozen)" below. Three jobs:
 
-1. **RSI token sync** — reads the HttpOnly `Rsi-Token` cookie from robertsspaceindustries.com
-   (where Sub is logged in as the Evocati account) and pushes it to SC Feed's owner endpoint,
-   so the cron's `RSI_TOKEN` refreshes itself instead of the manual DevTools copy-paste.
-   It only ever stores Sub's token — the endpoint is owner-gated and writes one locked row.
-2. **MOTD scrape** — RSI made `getMotd` moderator-only, so the MOTD can only be read from a
-   rendered lobby page. Two paths:
+1. **RSI token courier** — reads the `Rsi-Token` cookie from robertsspaceindustries.com
+   (where Sub is logged in as the Evocati account) and pushes it to SC Feed's owner endpoint on
+   every cookie change and every 6h. The VPS cron uses it to call `getMotd` for both testing
+   lobbies itself, so MOTD keeps updating while the PC is off. It only ever stores Sub's token —
+   the endpoint is owner-gated and writes one locked row.
+   ⚠️ Periodic alarms are created only when missing (`ensureAlarm`). `alarms.create()` re-arms an
+   existing alarm, and the service worker's top level re-runs on every 5-min wake — creating them
+   unconditionally meant the 6h push never fired (dead 2026-08-03 → 2026-09-16).
+2. **MOTD scrape (fallback)** — used only while the server's own fetch is failing; the alarm scan
+   skips itself when `GET /api/owner/motd` reports the fetch healthy, and the server ignores scraped
+   pushes in that state. Two paths:
    - *passive* — `content.js` catches changes instantly while you're browsing Spectrum;
    - *active* — every 15 min the background worker ensures a **pinned background tab** for each
      testing-chat lobby (`38230` → `motd-sc`, `1355241` → `motd-evo`), reviving it if Chrome's

@@ -157,7 +157,7 @@ const LOBBIES = [
   { lobbyId: '1355241', channelId: 'motd-evo', url: `${RSI_URL}/spectrum/community/SC/lobby/1355241` },
 ]
 
-// Push a scraped MOTD. This ALWAYS posts, even when the text is unchanged — the server compares
+// Push a scraped MOTD (fallback path). This ALWAYS posts, even when the text is unchanged — the server compares
 // signatures and decides whether it's a real change or just a liveness ping. Client-side dedupe
 // used to live here, and that was the bug: an unchanged MOTD and a dead scraper looked identical
 // from the server's side, which is how a dead scraper went unnoticed for a week in 2026-07.

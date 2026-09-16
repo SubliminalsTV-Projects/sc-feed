@@ -3,11 +3,12 @@ import { timingSafeEqual } from 'node:crypto'
 import { auth } from '@/auth'
 import { upsertMessage, SPECTRUM_MOTDS } from '@/app/api/cron/sc-feed/_shared'
 import { getConfigValue, setConfigValue } from '@/lib/sc-config'
+import { fetchHealthy, getAllMotdFetchStatus, getMotdFetchStatus } from '@/app/api/cron/sc-feed/motd'
 
-// Owner-only endpoint that ingests a Spectrum MOTD scraped by the browser extension. RSI made
-// `getMotd` moderator-only (denied even to a logged-in Evocati member from a non-browser context),
-// so the cron can no longer fetch the MOTD — but it's rendered in the lobby page, where the
-// extension reads it and POSTs the text here. Owner-gated exactly like /api/owner/rsi-token:
+// Owner-only FALLBACK ingest for a Spectrum MOTD scraped by the browser extension. The primary
+// source is the cron's own getMotd fetch (app/api/cron/sc-feed/motd.ts). While that fetch is
+// healthy for a channel, a scraped push only stamps the scrape heartbeat and writes no card, so the
+// two sources never produce duplicate cards. Owner-gated exactly like /api/owner/rsi-token:
 // an owner NextAuth session OR the owner push secret.
 //
 // The extension posts on EVERY scrape, including unchanged ones, and this route decides which it
@@ -73,6 +74,9 @@ export async function POST(req: Request) {
     await setConfigValue(scanKey, sig, { updated_via: 'extension' })
 
     if (lastSig === sig) return NextResponse.json({ ok: true, isNew: false, unchanged: true })
+    if (fetchHealthy(await getMotdFetchStatus(channelId))) {
+      return NextResponse.json({ ok: true, isNew: false, skipped: 'server fetch healthy' })
+    }
 
     const isNew = await upsertMessage(channelId, LABELS[channelId], {
       msg_id:        `motd-${channelId}-${sig}`,
@@ -88,4 +92,11 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
+}
+
+// Server fetch status per channel, for the extension (it skips its alarm scrape while healthy).
+// Codes and times only, never MOTD text or the token.
+export async function GET(req: Request) {
+  if (!(await authorized(req))) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  return NextResponse.json({ serverFetch: await getAllMotdFetchStatus() })
 }

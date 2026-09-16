@@ -16,8 +16,8 @@ import { resetRsiTokenCache } from '@/lib/rsi-token'
 // NOTE: there is deliberately NO "is this token logged in?" probe. RSI's identify endpoint
 // can't be verified from a server context — it reports anonymous for a perfectly valid token
 // (member resolution needs browser-only context), so the old probe rejected every real push.
-// The token is used only for forum/dev-tracker reads now; the MOTD is scraped in-browser by the
-// extension and pushed to /api/owner/motd, since RSI made getMotd moderator-only.
+// The cron uses the token for getMotd (app/api/cron/sc-feed/motd.ts) and forum/dev-tracker reads.
+// Whether it is a signed-in Evocati session shows up in the recorded getMotd result, not here.
 
 export const dynamic = 'force-dynamic'
 

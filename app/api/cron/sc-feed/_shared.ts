@@ -595,9 +595,8 @@ export async function fetchSpectrumForumThreads(forumId: string, label: string, 
   return count
 }
 
-// NOTE: fetchSpectrumMotd was removed — RSI made getMotd moderator-only, so the MOTD is now
-// scraped in-browser by the extension and pushed to /api/owner/motd. SPECTRUM_MOTDS is kept as
-// the channel/label/lobby map (used by /api/owner/motd to validate + label incoming MOTDs).
+// NOTE: the MOTD fetch lives in ./motd.ts (getMotd with the stored token; SPECTRUM_MOTDS above is
+// its lobby/channel map, also used by /api/owner/motd to validate the extension's fallback pushes).
 
 // ---------- pocketbase upsert ----------
 

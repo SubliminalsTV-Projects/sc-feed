@@ -15,10 +15,10 @@ export type SourceHealth = {
   lastUrl: string | null
   count24h: number
   total: number
-  // MOTD channels only: age of the last extension SCRAPE, stamped whether or not the text changed
-  // (see /api/owner/motd). This — not ageMs — is the scraper's liveness signal, because the MOTD
-  // can sit unchanged for days while the scraper is perfectly healthy.
-  scanAgeMs?: number | null
+  // MOTD channels only: the cron's last getMotd result (motd_fetch_<channel>, see
+  // app/api/cron/sc-feed/motd.ts). This — not ageMs — is the health signal, because the MOTD can
+  // sit unchanged for days while the fetch is perfectly healthy.
+  fetch?: { ok: boolean; code: string; at: string; failStreak: number; lastOkAt: string | null } | null
 }
 export type CronHealth = {
   source: string
@@ -104,11 +104,15 @@ export async function getHealth(): Promise<Health> {
         (select count(*) from scfeed.sc_feed_push_subscriptions)                                   as push_subs
     `,
     db.select().from(config).where(like(config.key, 'cron_hb_%')),
-    db.select().from(config).where(like(config.key, 'motd_scan_%')),
+    db.select().from(config).where(like(config.key, 'motd_fetch_%')),
   ])
 
-  const scanAge = new Map<string, number | null>(
-    scanRows.map((r) => [r.key.replace('motd_scan_', ''), r.updated ? now - r.updated.getTime() : null]),
+  const motdFetch = new Map<string, SourceHealth['fetch']>(
+    scanRows.map((r) => {
+      let v: SourceHealth['fetch'] = null
+      try { v = JSON.parse(r.value) } catch { /* keep null */ }
+      return [r.key.replace('motd_fetch_', ''), v]
+    }),
   )
 
   const sources: SourceHealth[] = sourceRows
@@ -123,7 +127,7 @@ export async function getHealth(): Promise<Health> {
         lastUrl: /^https?:\/\//i.test(url) ? url : null,
         count24h: Number(r.count_24h),
         total: Number(r.total),
-        ...(scanAge.has(r.channel_id as string) ? { scanAgeMs: scanAge.get(r.channel_id as string) } : {}),
+        ...(motdFetch.has(r.channel_id as string) ? { fetch: motdFetch.get(r.channel_id as string) } : {}),
       }
     })
     .sort((a, b) => (a.ageMs ?? Infinity) - (b.ageMs ?? Infinity))
