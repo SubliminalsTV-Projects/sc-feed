@@ -13,6 +13,38 @@ export type PatchNote = {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    version: '0.1.2',
+    date: '2026-09-16',
+    title: 'Your dashboard, your way',
+    intro:
+      'The biggest update since launch. Arrange the dashboard however you like, take it to every device, and read more without leaving the page.',
+    sections: [
+      {
+        heading: "What's new",
+        items: [
+          '**Drag and resize panels** — grab a panel by its header to move it, or drag any edge to resize it. Panels snap to a grid, always fill the height of your screen, and scroll sideways when you add more. Width and height menus are gone; the layout is the menu now.',
+          '**Your setup on every device** — sign in with Google, Discord or Twitch and your layout, presets, settings, custom feeds and read state follow you. Mark something read on your phone and it is read on your PC. Signing in is optional.',
+          '**Save for later** — signed in, hit the bookmark on any card and it lands in your Saved feed.',
+          '**Read it right here** — click a card to open it in a reader instead of a new tab. Comm-Links come with their hero image and full formatted article.',
+          '**See what changed in the Knowledge Base** — when CIG updates a KB article, the card shows exactly which lines changed. Repeat pings for the same edit collapse into one card.',
+          '**Dev replies with context** — Dev Tracker posts from Spectrum and Reddit now show what the dev was replying to, and Spectrum posts keep their headings, lists and emoji.',
+          '**Layout presets you can share** — export your layout as text and import it anywhere. The 16:9 and 9:16 presets are still one click away.',
+          '**Reworked header and Settings** — Settings slides in from the left in six sections, notifications slide in from the right, and the theme follows your system by default. The notification sound has mute and volume controls.',
+          '**A month of history** — SC Feed moved to a new database and now keeps 30 days of posts instead of 15.',
+          '**More reliable MOTDs** — the SC and Evocati MOTDs are captured a new way, so they stay current.',
+          '**Better link previews** — sharing SC Feed on Discord or X now shows a proper preview card.',
+        ],
+      },
+      {
+        heading: 'Privacy update',
+        items: [
+          '**Signing in stores settings on your account** — if you sign in, your settings, read state and saved items are kept against your account email so they can sync. Signed out, everything stays in your browser like before.',
+          '**Self-hosted analytics** — alongside Google Analytics, SC Feed now uses Umami, which we host ourselves. It sets no cookies and never shares data with anyone. Bots are filtered out of both. Full details on the [privacy page](/privacy).',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.1.1',
     date: '2026-06-15',
     title: 'New feed, faster loads, cleaner UI',
