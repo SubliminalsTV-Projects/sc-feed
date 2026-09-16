@@ -1,12 +1,12 @@
 // SC Feed companion (owner tool — Chrome is the maintained target; Firefox build is frozen)
 //
-// 1. RSI token sync — reads the HttpOnly `Rsi-Token` cookie from robertsspaceindustries.com
-//    and pushes it to SC Feed's owner endpoint when it changes. Used for forum/dev-tracker reads.
-// 2. MOTD scrape — RSI made getMotd moderator-only, so the MOTD can only be read from a rendered
-//    lobby page. Two paths feed it: the passive content script (content.js, instant when Sub is
-//    browsing Spectrum) and an ACTIVE alarm-driven scan that keeps pinned lobby tabs alive and
-//    injects the extractor on a timer. The active path exists because the passive one goes silent
-//    whenever no lobby is open or Chrome's Memory Saver discards the tab.
+// 1. RSI token courier — reads the `Rsi-Token` cookie from robertsspaceindustries.com and pushes
+//    it to SC Feed's owner endpoint when it changes, and every 6h. The VPS cron uses it to call
+//    getMotd itself (plus forum/dev-tracker reads), so delivering the token is the main job now.
+// 2. MOTD scrape — FALLBACK only. getMotd is not moderator-only (it gates on lobby read access),
+//    so the server fetches the MOTD directly. The passive content script (content.js) and an
+//    alarm-driven scan of pinned lobby tabs remain for when the server fetch is failing; the
+//    alarm scan skips itself while the server reports its own fetch healthy.
 // 3. Feed awareness — polls /api/sc-feed, shows the unread count on the toolbar badge, and
 //    fires a desktop notification when new items land (even with SC Feed closed).
 //
@@ -43,6 +43,16 @@ async function getConfig() {
 // and logged him out. The backend just stores whatever we send; the token is used only for
 // forum/dev-tracker reads now (MOTD comes from the content-script scrape, see below).
 let lastScan = { stores: 0, names: [], candidates: 0 }
+// Create a periodic alarm only if it is missing or its period changed. alarms.create() with an
+// existing name CANCELS and re-arms it, and this top level re-runs on every service-worker wake
+// (the 5-min feed poll). Creating unconditionally reset the 6h token alarm and the 15-min MOTD
+// alarm every 5 minutes, so neither ever fired — the token push died silently on 2026-08-03.
+async function ensureAlarm(name, periodInMinutes) {
+  const existing = await api.alarms.get(name).catch(() => null)
+  if (existing && existing.periodInMinutes === periodInMinutes) return
+  await api.alarms.create(name, { periodInMinutes })
+}
+
 async function readCookie() {
   let stores = [{ id: undefined }]
   try { const s = await api.cookies.getAllCookieStores(); if (s && s.length) stores = s } catch { /* fall back to default */ }
@@ -224,7 +234,26 @@ async function scrapeLobby(lobby, { attempts = 10, delayMs = 2000 } = {}) {
   return null
 }
 
+// True when the server's own getMotd fetch succeeded recently for every lobby. The alarm scan then
+// has nothing to add, so it skips opening/reloading pinned RSI tabs.
+async function serverFetchHealthy() {
+  const { feedUrl, secret } = await getConfig()
+  try {
+    const res = await fetch(`${feedUrl}/api/owner/motd`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} })
+    if (!res.ok) return false
+    const { serverFetch } = await res.json()
+    return LOBBIES.every(l => {
+      const f = serverFetch?.[l.channelId]
+      return f?.ok && Date.now() - new Date(f.at).getTime() < 45 * 60_000
+    })
+  } catch { return false }
+}
+
 async function runMotdScan(reason) {
+  if (reason === 'alarm' && await serverFetchHealthy()) {
+    await api.storage.local.set({ lastMotdScan: { at: now(), reason, results: [], skipped: 'server fetch healthy' } })
+    return []
+  }
   const results = []
   for (const lobby of LOBBIES) {
     const scraped = await scrapeLobby(lobby)
@@ -351,9 +380,9 @@ api.cookies.onChanged.addListener(({ cookie, removed }) => {
   debounce = setTimeout(() => pushToken('cookie-changed'), 1500)
 })
 
-api.alarms.create(TOKEN_ALARM, { periodInMinutes: 360 })
-api.alarms.create(FEED_ALARM, { periodInMinutes: 5 })
-api.alarms.create(MOTD_ALARM, { periodInMinutes: 15 })
+ensureAlarm(TOKEN_ALARM, 360)
+ensureAlarm(FEED_ALARM, 5)
+ensureAlarm(MOTD_ALARM, 15)
 api.alarms.onAlarm.addListener(a => {
   if (a.name === TOKEN_ALARM) pushToken('alarm')
   if (a.name === FEED_ALARM) pollFeed('alarm')
@@ -376,5 +405,5 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // Prime on install/startup so the badge + popup have data immediately, (re)create the right-click
 // "Send to SC Feed" menu, and get the lobby tabs up so the first MOTD scan has something to read.
-api.runtime.onInstalled?.addListener?.(() => { pollFeed('seed'); setupContextMenus(); runMotdScan('installed') })
-api.runtime.onStartup?.addListener?.(() => { pollFeed('seed'); setupContextMenus(); runMotdScan('startup') })
+api.runtime.onInstalled?.addListener?.(() => { pollFeed('seed'); setupContextMenus(); pushToken('installed'); runMotdScan('installed') })
+api.runtime.onStartup?.addListener?.(() => { pollFeed('seed'); setupContextMenus(); pushToken('startup'); runMotdScan('startup') })

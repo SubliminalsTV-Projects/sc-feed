@@ -40,6 +40,7 @@ function renderFeed(items) {
 function renderMotdScan(scan) {
   const el = $('motd')
   if (!scan) { el.textContent = 'MOTD scan: never run'; return }
+  if (scan.skipped) { el.textContent = `MOTD scan ${timeAgo(scan.at)} ago — skipped (${scan.skipped})`; return }
   const parts = (scan.results || []).map(r => `${r.channelId.replace('motd-', '')} ${r.ok ? (r.changed ? '✓ new' : '✓') : `✗ ${r.msg || ''}`}`)
   el.textContent = `MOTD scan ${timeAgo(scan.at)} ago — ${parts.join(' · ') || 'no lobbies'}`
 }
