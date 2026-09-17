@@ -318,3 +318,13 @@ html.light .kb-diff del { color: rgb(185 28 28); }
 .sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after { inset: 0 2px 0 auto; width: 2px; height: auto; }
 .sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-w::after { inset: 0 auto 0 2px; width: 2px; height: auto; }
 .sc-feed-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after { inset: auto 0 2px 0; height: 2px; width: auto; }
+
+/* Feed lists: cards scrolled out of view skip layout and paint. A column holds up to ~200 cards but
+   shows a dozen, and without this every card was laid out again on each frame of a tile resize
+   (measured 6.9 s of main-thread work for one widen + shrink in Chrome, 0.6 s with it). `auto`
+   remembers each card's real height once it has been on screen; 350px is the average card
+   (measured across all columns at 428px wide), so the scrollbar barely moves as cards come into view. */
+.sc-feed-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 350px;
+}
