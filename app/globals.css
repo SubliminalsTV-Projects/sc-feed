@@ -272,7 +272,11 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--mc-scrollbar-hover);
 }
-* { scrollbar-width: thin; scrollbar-color: var(--mc-scrollbar) transparent; }
+/* scrollbar-color is inherited, so it is declared once on :root. Declared on `*`, every element with
+   `transition-all` (thousands of cards and buttons) started a scrollbar-color transition on each style
+   recalc — ~8k per tile resize. */
+:root { scrollbar-color: var(--mc-scrollbar) transparent; }
+* { scrollbar-width: thin; }
 
 .scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-hidden::-webkit-scrollbar { display: none; }
