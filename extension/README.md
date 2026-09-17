@@ -38,10 +38,10 @@ Owner tool. **Chrome is the maintained target** — see "Firefox build (frozen)"
 - `build-firefox.sh` — assembles `dist-firefox/` (Firefox manifest as `manifest.json`) for signing
 
 ## Configure (popup → Settings)
-- **SC Feed URL** — prefilled with `https://sc-feed.subliminal.gg`; the token push endpoint is derived
-  from it (`/api/owner/rsi-token`) and is no longer a setting — it could only ever hold one value.
 - **Push secret** — `OWNER_PUSH_SECRET` (from Bitwarden: `bw-lookup --raw "API - SCFeed Owner Push Secret"`).
-  The only field that actually needs filling in.
+  The only field there is: the SC Feed URL and the token push endpoint were settings that could only
+  ever hold one value, so the URL is a constant (`https://sc-feed.subliminal.gg`) and the endpoint is
+  derived from it. A `feedUrl` in storage from an older version still wins, for pointing at localhost.
 - **Desktop notifications** — on/off
 
 ## Install — Chrome / Edge

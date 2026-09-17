@@ -2,7 +2,12 @@ const api = globalThis.browser ?? globalThis.chrome
 const $ = id => document.getElementById(id)
 const DEFAULT_FEED = 'https://sc-feed.subliminal.gg'
 
-function feedUrl() { return ($('feedUrl').value.trim() || DEFAULT_FEED).replace(/\/$/, '') }
+// The SC Feed URL is not a setting — it has exactly one value in practice, and every field in this
+// panel that can't be wrong is one more thing between Sub and the only field that can be (the
+// secret). A `feedUrl` stored by an older version still wins, so a dev pointing at localhost keeps
+// working; set it from the console if you need to.
+let cfgFeedUrl = DEFAULT_FEED
+function feedUrl() { return cfgFeedUrl }
 
 function timeAgo(ts) {
   if (!ts) return ''
@@ -47,7 +52,7 @@ function renderMotdScan(scan) {
 
 async function load() {
   const c = await api.storage.local.get(['secret', 'feedUrl', 'notify', 'latestItems', 'lastStatus', 'lastMotdScan'])
-  $('feedUrl').value = c.feedUrl || DEFAULT_FEED
+  cfgFeedUrl = (c.feedUrl || DEFAULT_FEED).replace(/\/$/, '')
   $('secret').value = c.secret || ''
   $('notify').checked = c.notify !== false
   renderToken(c.lastStatus)
@@ -59,16 +64,12 @@ async function load() {
 }
 
 $('save').addEventListener('click', async () => {
-  await api.storage.local.set({
-    feedUrl: feedUrl(),
-    secret: $('secret').value.trim(),
-    notify: $('notify').checked,
-  })
+  await api.storage.local.set({ secret: $('secret').value.trim(), notify: $('notify').checked })
   $('msg').textContent = 'Saved.'
 })
 
 $('push').addEventListener('click', async () => {
-  await api.storage.local.set({ feedUrl: feedUrl(), secret: $('secret').value.trim() })
+  await api.storage.local.set({ secret: $('secret').value.trim() })
   $('msg').textContent = 'Pushing token…'
   await api.runtime.sendMessage({ type: 'push-now' }).catch(() => {})
   const { lastStatus } = await api.storage.local.get(['lastStatus'])
