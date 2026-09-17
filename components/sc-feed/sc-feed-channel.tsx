@@ -371,7 +371,7 @@ export function ChannelFeed({ channel, isLeaks, revealed, lastSeen, enabledCateg
         <RsiStatusCard rsiStatus={channel.rsiStatus} />
       )}
 
-      <div className="flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
+      <div className="sc-feed-list flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
         {channel.error ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-12">
             <Rss className="w-6 h-6 text-on-surface-variant/30" />
@@ -515,7 +515,7 @@ export const UnifiedMotdFeed = memo(function UnifiedMotdFeed({
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
+      <div className="sc-feed-list flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
         {displayMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-12">
             <Rss className="w-6 h-6 text-on-surface-variant/30" />
@@ -803,7 +803,7 @@ export const UnifiedOmniFeed = memo(function UnifiedOmniFeed({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
+      <div ref={scrollRef} className="sc-feed-list flex-1 overflow-y-auto min-h-0 p-2.5 space-y-1.5">
         {displayMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-12">
             <Rss className="w-6 h-6 text-on-surface-variant/30" />
