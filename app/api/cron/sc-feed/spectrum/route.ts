@@ -9,6 +9,7 @@ import {
   stampCronHeartbeat,
   type NewMsg,
 } from '../_shared'
+import { runMotdFetch } from '../motd'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,8 @@ export async function GET(request: Request) {
   // PocketBase (extension-pushed) token first, env fallback. Required for Spectrum forum reads.
   // force=true: re-read the stored token each cycle so a freshly pushed token is picked up
   // immediately (the server is long-lived; without force it'd keep using the boot-time token).
-  if (!(await loadRsiToken(true))) {
+  const token = await loadRsiToken(true)
+  if (!token) {
     await stampCronHeartbeat('spectrum', { ok: false, error: 'RSI_TOKEN not set' })
     return NextResponse.json({ error: 'RSI_TOKEN not set' }, { status: 500 })
   }
@@ -37,9 +39,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // NOTE: Spectrum MOTDs are no longer fetched here. RSI made getMotd moderator-only (denied
-  // even to a logged-in Evocati member from a server context), so the MOTD is now scraped from
-  // the rendered lobby page by the browser extension and pushed to /api/owner/motd.
+  // Spectrum MOTDs — fetched server-side with the stored token (see ../motd.ts). Each result is
+  // recorded as motd_fetch_<channel>; that record IS the session health check. Upsert only, no
+  // push (MOTD changes are informational, not news).
+  const motd = await runMotdFetch(token)
 
   if (newMsgs.length > 0) {
     await sendPushNotifications(newMsgs).catch(() => {})
@@ -47,6 +50,6 @@ export async function GET(request: Request) {
 
   const ok = Object.values(results).every((r) => (r as { ok?: boolean }).ok !== false)
   const count = Object.values(results).reduce<number>((n, r) => n + ((r as { count?: number }).count ?? 0), 0)
-  await stampCronHeartbeat('spectrum', { ok, count, pushed: newMsgs.length, channels: results })
-  return NextResponse.json({ ok: true, channels: results, pushed: newMsgs.length })
+  await stampCronHeartbeat('spectrum', { ok, count, pushed: newMsgs.length, channels: results, motd })
+  return NextResponse.json({ ok: true, channels: results, motd, pushed: newMsgs.length })
 }

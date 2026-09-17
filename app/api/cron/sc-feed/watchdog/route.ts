@@ -1,43 +1,45 @@
 import { NextResponse } from 'next/server'
-import { requireSecret, stampCronHeartbeat } from '../_shared'
-import { sql } from '@/lib/db'
-import { getConfigStatus, getConfigValue, setConfigValue } from '@/lib/sc-config'
+import { requireSecret, stampCronHeartbeat, SPECTRUM_MOTDS } from '../_shared'
+import { getAllMotdFetchStatus } from '../motd'
+import { ago, assess, type Kind } from './assess'
+import { getConfigValue, setConfigValue } from '@/lib/sc-config'
 
-// Extension-liveness watchdog. The SC Feed browser extension is the SOLE source of both the RSI
-// token push AND the MOTD scrape, and it can silently die (self-uninstall, disabled, browser
-// closed) — which is exactly what froze the MOTD for a week in 2026-07 with nothing flagging it.
+// MOTD watchdog. Alerts on the RESULT of the cron's real getMotd fetch (motd_fetch_<channel>),
+// never on how old the extension's token push is.
 //
-// Both of its jobs now stamp their own timer-driven heartbeat, so liveness is measured directly
-// rather than inferred from content: the token is re-pushed every 6h (background.js TOKEN_ALARM)
-// and every MOTD lobby is re-scraped every 15min (MOTD_ALARM), each scrape stamping
-// `motd_scan_<channel>` whether or not the text changed. This endpoint (fired by the VPS host
-// crontab, same as the other cron routes) checks those two heartbeats and fires a Discord webhook
-// when either goes stale — a PUSH alert, because the failure mode is precisely "nobody was
-// looking at the dashboard".
+// Why: until 2026-09 it alarmed on token-push age and extension scrape age. Both measure the
+// messenger, not the outcome, and a broken extension alarm left it re-posting the same warning
+// every day from 2026-08-04 — so everyone learned to ignore it. The fetch result is exact:
+//   • ErrPermissionDenied N runs in a row → the RSI session ended. One message: sign in once.
+//   • any other failing code N runs in a row → RSI or network trouble; says which code.
+//   • no fetch recorded for over an hour → the spectrum cron itself stopped.
+// A PC being off is not a failure any more (the fetch runs on the VPS), so it never alerts.
 //
-// De-duped via a `watchdog_state` config row: one alert on the transition to stale, a reminder
-// every WATCHDOG_RENOTIFY_HOURS while it stays stale, and a recovery ping when it clears.
+// De-duped via `watchdog_state`: one alert when a problem starts or changes kind, a reminder every
+// WATCHDOG_RENOTIFY_HOURS while it lasts, and a recovery ping when it clears. Fired every 10 min
+// by subliminal's crontab on the VPS (~/sc-feed-watchdog.sh).
 
 export const dynamic = 'force-dynamic'
 
 const H = 3600_000
-const TOKEN_STALE_MS = (Number(process.env.WATCHDOG_TOKEN_STALE_HOURS)     || 12) * H
-const SCAN_STALE_MS  = (Number(process.env.WATCHDOG_MOTD_SCAN_STALE_HOURS) || 24) * H
-const RENOTIFY_MS    = (Number(process.env.WATCHDOG_RENOTIFY_HOURS)        || 24) * H
+const RENOTIFY_MS = (Number(process.env.WATCHDOG_RENOTIFY_HOURS) || 24) * H
 
-const MOTD_CHANNELS = ['motd-sc', 'motd-evo'] as const
-const MOTD_LABEL: Record<string, string> = { 'motd-sc': 'SC MOTD', 'motd-evo': 'Evo MOTD' }
+type WatchdogState = { alerting: boolean; kind?: Kind | ''; since: string; lastNotified: string }
+const EMPTY_STATE: WatchdogState = { alerting: false, kind: '', since: '', lastNotified: '' }
 
-type WatchdogState = { alerting: boolean; since: string; lastNotified: string }
-const EMPTY_STATE: WatchdogState = { alerting: false, since: '', lastNotified: '' }
-
-function ago(ms: number | null): string {
-  if (ms == null) return 'never'
-  const m = Math.round(ms / 60000)
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 48) return `${h}h ago`
-  return `${Math.round(h / 24)}d ago`
+const MESSAGES: Record<Kind, { title: string; fix: string }> = {
+  'session-ended': {
+    title: '🔴 RSI session ended — sign in once',
+    fix: "Sign in to robertsspaceindustries.com in Chrome (pick the longest 'stay signed in' option). The SC Feed extension delivers the new token and the MOTD resumes on the next cron run.",
+  },
+  'fetch-failing': {
+    title: '⚠️ SC Feed: MOTD fetch failing',
+    fix: 'Not a sign-in problem — RSI or the network is returning errors. Usually clears on its own; check RSI status if it lasts.',
+  },
+  'fetch-not-running': {
+    title: '⚠️ SC Feed: MOTD fetch not running',
+    fix: 'The spectrum cron has stopped recording results. Check /opt/sc-feed-cron.sh on the VPS and the app container.',
+  },
 }
 
 async function sendDiscord(embed: Record<string, unknown>): Promise<{ sent: boolean; reason: string }> {
@@ -61,73 +63,38 @@ export async function GET(request: Request) {
 
   try {
     const now = Date.now()
+    const status = await getAllMotdFetchStatus()
+    const { kind, detail } = assess(status, now, {
+      failRuns:  Number(process.env.WATCHDOG_FETCH_FAIL_RUNS) || 3,
+      staleMs:  (Number(process.env.WATCHDOG_FETCH_STALE_HOURS) || 1) * H,
+    })
 
-    // 1. Extension liveness — the token is re-pushed every 6h, so a stale `updated` = dead extension.
-    const tok = await getConfigStatus('rsi_token')
-    const tokenAgeMs = tok.updated ? now - new Date(tok.updated).getTime() : null
-    const tokenStale = tokenAgeMs == null || tokenAgeMs > TOKEN_STALE_MS
-
-    // 2. MOTD SCRAPE liveness — the extension posts every scrape (changed or not) and the ingest
-    //    route stamps `motd_scan_<channel>`, so this age tracks the scraper itself. Deliberately
-    //    NOT message age: the MOTD can legitimately sit unchanged for days, and alarming on that
-    //    trained the alert to be ignored while saying nothing about whether the scraper was alive.
-    const scanAge: Record<string, number | null> = {}
-    for (const c of MOTD_CHANNELS) {
-      const st = await getConfigStatus(`motd_scan_${c}`)
-      scanAge[c] = st.updated ? now - new Date(st.updated).getTime() : null
-    }
-    const scanStale = MOTD_CHANNELS.filter((c) => scanAge[c] == null || (scanAge[c] as number) > SCAN_STALE_MS)
-
-    // 3. MOTD content age — informational only, shown in the embed so a genuinely quiet lobby is
-    //    visible without being an alarm.
-    const rows = await sql`
-      select channel_id, max(ts_raw) as last_ts
-      from scfeed.sc_feed_messages
-      where channel_id in ('motd-sc', 'motd-evo')
-      group by channel_id
-    `
-    const motdAge: Record<string, number | null> = { 'motd-sc': null, 'motd-evo': null }
-    for (const r of rows) {
-      const ts = r.last_ts ? new Date(r.last_ts as string).getTime() : null
-      motdAge[r.channel_id as string] = ts == null ? null : now - ts
-    }
-
-    const stale = tokenStale || scanStale.length > 0
-    const reasons: string[] = []
-    if (tokenStale) reasons.push(`extension heartbeat stale — token last pushed ${ago(tokenAgeMs)}`)
-    for (const c of scanStale) reasons.push(`${MOTD_LABEL[c]} scraper stale — last scan ${ago(scanAge[c])}`)
-
-    // De-dup state.
     let state = EMPTY_STATE
     try { const raw = await getConfigValue('watchdog_state'); if (raw) state = { ...EMPTY_STATE, ...JSON.parse(raw) } } catch { /* keep empty */ }
 
-    const fields = [
-      { name: 'Token push', value: ago(tokenAgeMs), inline: true },
-      ...MOTD_CHANNELS.map((c) => ({
-        name: `${MOTD_LABEL[c]} scan`,
-        value: `${ago(scanAge[c])}\n(content ${ago(motdAge[c])})`,
-        inline: true,
-      })),
-    ]
+    const fields = SPECTRUM_MOTDS.map(m => {
+      const s = status[m.channelId]
+      return { name: m.label, value: s ? `${s.code} · ${ago(s.at, now)}\nlast OK ${ago(s.lastOkAt, now)}` : 'never fetched', inline: true }
+    })
 
     let action = 'none'
     let delivery: { sent: boolean; reason: string } | null = null
 
-    if (stale) {
-      const firstTime = !state.alerting
+    if (kind) {
+      const changed = !state.alerting || state.kind !== kind
       const dueAgain = !!state.lastNotified && now - new Date(state.lastNotified).getTime() > RENOTIFY_MS
-      if (firstTime || dueAgain) {
+      if (changed || dueAgain) {
         delivery = await sendDiscord({
-          title: '⚠️ SC Feed: extension appears down',
-          description: `${reasons.join('\n')}\n\n**Fix:** check the SC Feed extension in Chrome (\`chrome://extensions\`) — it manages its own pinned lobby tabs, so if scans stopped it is disabled, removed, or logged out of RSI.`,
-          color: 0xffb231,
+          title: MESSAGES[kind].title,
+          description: `${detail}\n\n**Fix:** ${MESSAGES[kind].fix}`,
+          color: kind === 'session-ended' ? 0xf87171 : 0xffb231,
           fields,
           footer: { text: 'SC Feed watchdog · sc-feed.subliminal.gg/owner' },
         })
-        action = firstTime ? 'alerted' : 're-alerted'
+        action = changed ? 'alerted' : 're-alerted'
         state = {
-          alerting: true,
-          since: firstTime ? new Date(now).toISOString() : state.since,
+          alerting: true, kind,
+          since: changed ? new Date(now).toISOString() : state.since,
           lastNotified: new Date(now).toISOString(),
         }
         await setConfigValue('watchdog_state', JSON.stringify(state), { updated_via: 'watchdog' })
@@ -136,20 +103,20 @@ export async function GET(request: Request) {
       }
     } else if (state.alerting) {
       delivery = await sendDiscord({
-        title: '✅ SC Feed: extension recovered',
-        description: 'Token push + MOTD scrapes are running again.',
+        title: '✅ SC Feed: MOTD fetch recovered',
+        description: `getMotd is succeeding again (problem was: ${state.kind || 'unknown'}, since ${ago(state.since, now)}).`,
         color: 0x51cf66,
         fields,
         footer: { text: 'SC Feed watchdog' },
       })
       action = 'recovered'
-      state = { alerting: false, since: '', lastNotified: new Date(now).toISOString() }
+      state = { ...EMPTY_STATE, lastNotified: new Date(now).toISOString() }
       await setConfigValue('watchdog_state', JSON.stringify(state), { updated_via: 'watchdog' })
     }
 
     const summary = {
-      ok: true, stale, action,
-      tokenAgeMs, scanAge, motdAge,
+      ok: true, problem: kind, action,
+      fetch: Object.fromEntries(Object.entries(status).map(([ch, s]) => [ch, s ? { ok: s.ok, code: s.code, failStreak: s.failStreak } : null])),
       ...(delivery ? { delivered: delivery.sent, deliveryNote: delivery.reason } : {}),
     }
     await stampCronHeartbeat('watchdog', summary)
