@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { auth } from '@/auth'
-import { getConfigStatus, setConfigValue } from '@/lib/sc-config'
+import { getConfigStatus, getConfigValue, setConfigValue } from '@/lib/sc-config'
 import { resetRsiTokenCache } from '@/lib/rsi-token'
+import { SESSION_ENDED_CODE, SPECTRUM_TOKEN_CHECK_LOBBY, fetchSpectrumMotd, getMotdFetchStatus } from '@/app/api/cron/sc-feed/motd'
 
 // Owner-only endpoint that stores Sub's RSI session cookie (`Rsi-Token`) into the locked
 // `sc_feed_config` singleton, replacing the manual DevTools copy-paste. The browser
@@ -13,9 +14,9 @@ import { resetRsiTokenCache } from '@/lib/rsi-token'
 // `rsi_token` row (sc-config upserts, never inserts per-user); (3) the PB collection itself
 // is admin-only (no open writes). A signed-in guest hitting this gets 403.
 //
-// NOTE: there is deliberately NO "is this token logged in?" probe. RSI's identify endpoint
-// can't be verified from a server context — it reports anonymous for a perfectly valid token
-// (member resolution needs browser-only context), so the old probe rejected every real push.
+// NOTE: never probe RSI's identify endpoint with the token — it reports anonymous for a valid token
+// from a server, and the extension's identify probe logged Sub out in June 2026. The only check is
+// the read-only getMotd guard below.
 // The cron uses the token for getMotd (app/api/cron/sc-feed/motd.ts) and forum/dev-tracker reads.
 // Whether it is a signed-in Evocati session shows up in the recorded getMotd result, not here.
 
@@ -53,6 +54,22 @@ export async function POST(req: Request) {
   if (token.length < 16 || /\s/.test(token)) {
     return NextResponse.json({ error: 'token missing or malformed' }, { status: 422 })
   }
+
+  // Two browsers can push (Sub's Chrome and the always-on VPS browser). RSI keeps one session per
+  // account, so one of them may hold a dead token and keep pushing it. Never let a push replace a
+  // WORKING token with one that cannot read the Evocati lobby: while the last server fetch is OK,
+  // a different token must pass one read-only getMotd first. If the current token is already
+  // failing, accept anything — it cannot make things worse.
+  try {
+    const current = await getConfigValue(KEY)
+    const working = (await getMotdFetchStatus('motd-sc'))?.ok === true
+    if (token !== current && working) {
+      const probe = await fetchSpectrumMotd(SPECTRUM_TOKEN_CHECK_LOBBY, token)
+      if (!probe.ok && probe.code === SESSION_ENDED_CODE) {
+        return NextResponse.json({ error: 'token cannot read the Evocati lobby; keeping the working token', code: probe.code }, { status: 409 })
+      }
+    }
+  } catch { /* guard is best-effort; fall through and store */ }
 
   try {
     await setConfigValue(KEY, token, { updated_by: a.who, updated_via: a.via === 'secret' ? 'extension' : 'owner-session' })

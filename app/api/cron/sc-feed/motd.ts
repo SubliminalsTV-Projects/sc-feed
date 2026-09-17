@@ -19,6 +19,8 @@ import { SPECTRUM_HEADERS, SPECTRUM_MOTDS, upsertMessage } from './_shared'
 // The only code that means "the session is gone". Anything else (HTTP 5xx, NETWORK, …) is RSI or
 // the network misbehaving, and says nothing about the token.
 export const SESSION_ENDED_CODE = 'ErrPermissionDenied'
+// sc-testing-chat: the lobby whose getMotd result decides "is this token a signed-in Evocati session".
+export const SPECTRUM_TOKEN_CHECK_LOBBY = '38230'
 
 export type MotdFetchStatus = {
   ok: boolean
@@ -30,8 +32,7 @@ export type MotdFetchStatus = {
 
 type Motd = { message: string; last_modified: number }
 
-export async function fetchSpectrumMotd(lobbyId: string): Promise<{ ok: boolean; code: string; motd?: Motd }> {
-  const token = rsiTokenValue()
+export async function fetchSpectrumMotd(lobbyId: string, token = rsiTokenValue()): Promise<{ ok: boolean; code: string; motd?: Motd }> {
   try {
     const res = await fetch('https://robertsspaceindustries.com/api/spectrum/lobby/getMotd', {
       method: 'POST',
