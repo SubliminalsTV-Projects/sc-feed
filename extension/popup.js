@@ -46,9 +46,8 @@ function renderMotdScan(scan) {
 }
 
 async function load() {
-  const c = await api.storage.local.get(['endpoint', 'secret', 'feedUrl', 'notify', 'latestItems', 'lastStatus', 'lastMotdScan'])
-  $('feedUrl').value = c.feedUrl || ''
-  $('endpoint').value = c.endpoint || ''
+  const c = await api.storage.local.get(['secret', 'feedUrl', 'notify', 'latestItems', 'lastStatus', 'lastMotdScan'])
+  $('feedUrl').value = c.feedUrl || DEFAULT_FEED
   $('secret').value = c.secret || ''
   $('notify').checked = c.notify !== false
   renderToken(c.lastStatus)
@@ -61,8 +60,7 @@ async function load() {
 
 $('save').addEventListener('click', async () => {
   await api.storage.local.set({
-    feedUrl: $('feedUrl').value.trim(),
-    endpoint: $('endpoint').value.trim(),
+    feedUrl: feedUrl(),
     secret: $('secret').value.trim(),
     notify: $('notify').checked,
   })
@@ -70,7 +68,7 @@ $('save').addEventListener('click', async () => {
 })
 
 $('push').addEventListener('click', async () => {
-  await api.storage.local.set({ endpoint: $('endpoint').value.trim(), secret: $('secret').value.trim() })
+  await api.storage.local.set({ feedUrl: feedUrl(), secret: $('secret').value.trim() })
   $('msg').textContent = 'Pushing token…'
   await api.runtime.sendMessage({ type: 'push-now' }).catch(() => {})
   const { lastStatus } = await api.storage.local.get(['lastStatus'])

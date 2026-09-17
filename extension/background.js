@@ -16,8 +16,8 @@ const api = globalThis.browser ?? globalThis.chrome
 
 const RSI_URL = 'https://robertsspaceindustries.com'
 const COOKIE = 'Rsi-Token'
-const DEFAULT_ENDPOINT = 'https://sc-feed.subliminal.gg/api/owner/rsi-token'
 const DEFAULT_FEED = 'https://sc-feed.subliminal.gg'
+const TOKEN_PATH = '/api/owner/rsi-token'
 const TOKEN_ALARM = 'rsi-token-resync'
 const FEED_ALARM = 'feed-poll'
 const MOTD_ALARM = 'motd-scan'
@@ -25,12 +25,16 @@ let debounce = null
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// The push endpoint is derived from the feed URL — it was a separate setting that could only ever
+// hold one value, and an empty-looking required field is how a setup gets skipped. A stored
+// `endpoint` from an older version still wins, so nothing breaks on upgrade.
 async function getConfig() {
   const c = await api.storage.local.get(['endpoint', 'secret', 'feedUrl', 'notify'])
+  const feedUrl = (c.feedUrl || DEFAULT_FEED).replace(/\/$/, '')
   return {
-    endpoint: c.endpoint || DEFAULT_ENDPOINT,
+    endpoint: c.endpoint || `${feedUrl}${TOKEN_PATH}`,
     secret: c.secret || '',
-    feedUrl: (c.feedUrl || DEFAULT_FEED).replace(/\/$/, ''),
+    feedUrl,
     notify: c.notify !== false,
   }
 }
