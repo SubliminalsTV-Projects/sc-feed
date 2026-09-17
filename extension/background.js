@@ -40,6 +40,12 @@ async function getConfig() {
 }
 
 // ---------- RSI token sync ----------
+// ⚠️ `Rsi-Token` is NOT a Secure cookie, and Chrome derives a cookie's URL from its Secure flag when
+// it checks host permissions. With https-only host permissions this extension could read RSI's two
+// Secure cookies and NOTHING else — `cookies.getAll` returned "CookieConsent, _rdt_uuid" and the push
+// reported "not signed in to RSI in this browser profile" while the profile was signed in.
+// The http:// host permissions in the manifest exist for that, and only for that: no page is loaded
+// over http. Removing them silently kills the token push again.
 // Read the Rsi-Token cookie across every store (Zen/Firefox containers each have their own) and
 // push it. There is deliberately NO "is this token logged in?" probe: RSI's identify endpoint
 // can't be verified from a non-browser context (it reports anonymous for a perfectly valid
