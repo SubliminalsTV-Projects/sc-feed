@@ -12,7 +12,6 @@
 
 import { eq, max } from 'drizzle-orm'
 import { db, messages as messagesTbl } from '@/lib/db'
-import { rsiTokenValue } from '@/lib/rsi-token'
 import { getConfigValue, setConfigValue } from '@/lib/sc-config'
 import { SPECTRUM_HEADERS, SPECTRUM_MOTDS, upsertMessage } from './_shared'
 
@@ -32,7 +31,10 @@ export type MotdFetchStatus = {
 
 type Motd = { message: string; last_modified: number }
 
-export async function fetchSpectrumMotd(lobbyId: string, token = rsiTokenValue()): Promise<{ ok: boolean; code: string; motd?: Motd }> {
+// The token is always passed in, never read from the module-cached helper: the caller has already
+// loaded it, and a second module instance of lib/rsi-token (seen under tsx) resolves to an empty
+// token, which sends an ANONYMOUS request that RSI denies — indistinguishable from a dead session.
+export async function fetchSpectrumMotd(lobbyId: string, token: string): Promise<{ ok: boolean; code: string; motd?: Motd }> {
   try {
     const res = await fetch('https://robertsspaceindustries.com/api/spectrum/lobby/getMotd', {
       method: 'POST',
@@ -110,11 +112,11 @@ async function upsertIfNewer(channelId: string, label: string, motd: Motd): Prom
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /** Fetch every MOTD lobby (3.5s apart), record the result, upsert real changes. Never throws. */
-export async function runMotdFetch(): Promise<Record<string, { ok: boolean; code: string; isNew?: boolean; failStreak: number }>> {
+export async function runMotdFetch(token: string): Promise<Record<string, { ok: boolean; code: string; isNew?: boolean; failStreak: number }>> {
   const results: Record<string, { ok: boolean; code: string; isNew?: boolean; failStreak: number }> = {}
   for (const [i, m] of SPECTRUM_MOTDS.entries()) {
     if (i > 0) await sleep(3500)
-    const r = await fetchSpectrumMotd(m.lobbyId)
+    const r = await fetchSpectrumMotd(m.lobbyId, token)
     const status = await recordMotdFetch(m.channelId, r.ok, r.code)
     let isNew: boolean | undefined
     if (r.ok && r.motd) isNew = await upsertIfNewer(m.channelId, m.label, r.motd).catch(() => false)
