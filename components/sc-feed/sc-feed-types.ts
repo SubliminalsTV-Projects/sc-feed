@@ -49,6 +49,10 @@ export const COLUMN_WIDTHS = { narrow: 340, medium: 420, wide: 560 } as const
 export type ColumnWidth = keyof typeof COLUMN_WIDTHS
 export type ColumnHeight = 'full' | 'half' | 'third' | 'quarter'
 
+// Desktop grid tile, in grid units (see sc-feed-grid.tsx). Keyed by panel id.
+export interface GridPos { x: number; y: number; w: number; h: number }
+export type GridLayout = Record<string, GridPos>
+
 export const PILL = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9px] font-label font-black uppercase tracking-widest shrink-0 transition-colors'
 
 export const NOTIF_READ_KEY = 'notifications-read-ids'
@@ -88,8 +92,11 @@ export interface LayoutPreset {
   id: string
   name: string
   columnOrder: string[]
-  columnWidths: Record<string, ColumnWidth>
-  columnHeights: Record<string, ColumnHeight>
+  // Old column-strip sizes. Only read when `grid` is absent (presets saved before the grid);
+  // they are converted into tiles by legacyToGrid.
+  columnWidths?: Record<string, ColumnWidth>
+  columnHeights?: Record<string, ColumnHeight>
+  grid?: GridLayout
   hiddenChannels: string[]
   isDefault?: boolean
 }

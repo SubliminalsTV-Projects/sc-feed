@@ -7,6 +7,8 @@
   "host_permissions": [
     "https://robertsspaceindustries.com/*",
     "https://*.robertsspaceindustries.com/*",
+    "http://robertsspaceindustries.com/*",
+    "http://*.robertsspaceindustries.com/*",
     "https://sc-feed.subliminal.gg/*"
   ],
   "content_scripts": [

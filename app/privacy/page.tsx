@@ -27,7 +27,7 @@ export default function PrivacyPage() {
 
         <Section title="TL;DR">
           <p>
-            SC Feed stores your preferences in your browser. We use Google Analytics and a self-hosted Umami for anonymous,
+            SC Feed stores your preferences in your browser, and on your account if you sign in. We use Google Analytics and a self-hosted Umami for anonymous,
             aggregate usage stats (which pages get visited, roughly how many people use the app) &mdash;
             but we don&apos;t sell your data, don&apos;t run ads, and don&apos;t build a profile on you.
             Push notifications are optional and only sent for new feed activity.
@@ -37,10 +37,11 @@ export default function PrivacyPage() {
         <Section title="What we store on your device">
           <p>
             SC Feed uses your browser&apos;s localStorage to remember preferences across visits.
-            None of this leaves your computer.
+            If you don&apos;t sign in, none of this leaves your computer. If you do, most of it is also
+            saved to your account (see below).
           </p>
           <ul>
-            <li><strong>Layout</strong> — column order, widths, heights, and which feeds are visible.</li>
+            <li><strong>Layout</strong> — where each feed panel sits, its size, which feeds are visible, and your saved layout presets.</li>
             <li><strong>Read state</strong> — which messages you&apos;ve marked as read, plus your &ldquo;mark all read&rdquo; cutoff timestamp.</li>
             <li><strong>Custom feeds</strong> — the YouTube channels, Twitch streamers, and RSS URLs you&apos;ve added in Settings.</li>
             <li><strong>Display preferences</strong> — theme (dark/light), tab bar visibility, date format, leak reveal toggle, OmniFeed source filters.</li>
@@ -56,6 +57,16 @@ export default function PrivacyPage() {
               <strong>Push notifications (optional).</strong> If you enable them in Settings, your browser provides a push subscription endpoint
               from its push service (Firebase for Chrome/Edge, Mozilla autopush for Firefox, Apple push for Safari). We store this endpoint
               so we can deliver alerts. It&apos;s only used for SC Feed activity notifications. Toggle off in Settings → Push Notifications to stop.
+            </li>
+            <li>
+              <strong>Your settings, if you sign in.</strong> When you&apos;re signed in, SC Feed keeps a copy of your
+              layout, presets, display preferences, custom feeds and read state on our server, stored against your
+              account email, so they follow you to other devices. It is only used for that. Signed-out visitors
+              send nothing.
+            </li>
+            <li>
+              <strong>Saved items, if you sign in.</strong> Links you save with the bookmark button or &ldquo;Send to SC Feed&rdquo;
+              are stored against your account email so your Saved feed shows them.
             </li>
             <li>
               <strong>Standard web server logs.</strong> IP address, request path, timestamp. Used for debugging and abuse prevention.
@@ -118,6 +129,7 @@ export default function PrivacyPage() {
             <li>Use your browser&apos;s &ldquo;Clear site data&rdquo; option for <code>sc-feed.subliminal.gg</code>.</li>
             <li>Or open DevTools → Application → Local Storage and clear entries prefixed <code>sc-feed-</code>.</li>
             <li>Or, for granular control, use the Settings panel inside SC Feed: remove individual custom feeds, mark all unread, or apply a layout preset.</li>
+            <li>If you signed in, clearing your browser does not remove the copy on your account. To have it deleted, get in touch (below).</li>
           </ul>
           <p>
             To stop push notifications: toggle off in Settings → Push Notifications, or revoke notification permission

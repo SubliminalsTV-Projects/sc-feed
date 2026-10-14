@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from 'react'
 
-// Live RSI-token validity probe. Hits the existing /api/sc-feed/spectrum-health route (forum +
-// per-lobby MOTD checks, up to ~8s) client-side so the owner page renders instantly and this
-// resolves async. Distinct from the server-rendered "sync status" card, which only proves the
-// extension pushed *a* token — this proves the token still works for the gated Spectrum calls.
-type Probe = { valid: boolean; reason?: string; forum?: boolean; motd?: Record<string, string> }
+// RSI-token validity. Reads /api/sc-feed/spectrum-health, which reports the cron's last real
+// getMotd result (no live RSI call). Distinct from the server-rendered "sync status" card, which
+// only proves the extension pushed *a* token — this proves the token still reads the Evocati lobby.
+type Probe = { valid: boolean; reason?: string; checkedAt?: string; motd?: Record<string, string> }
 
 export function RsiTokenLive() {
   const [data, setData] = useState<Probe | null>(null)
@@ -43,7 +42,7 @@ export function RsiTokenLive() {
         <p className="text-[12px] font-body text-red-300/80 leading-relaxed">{data.reason}</p>
       )}
       {valid && (
-        <p className="text-[11px] font-body text-on-surface-variant/45">Forum + MOTD probes passed — Spectrum/Evo access OK.</p>
+        <p className="text-[11px] font-body text-on-surface-variant/45">getMotd succeeded for both lobbies on the last cron run.</p>
       )}
     </div>
   )

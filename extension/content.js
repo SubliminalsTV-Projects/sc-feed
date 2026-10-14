@@ -1,9 +1,9 @@
 // SC Feed Companion — Spectrum MOTD scraper (content script)
 //
-// RSI made the getMotd API moderator-only, so neither our server nor even a logged-in Evocati
-// member can fetch the MOTD programmatically. But it IS rendered in the lobby page. This script
-// reads it off the DOM whenever a testing-chat lobby is open and hands it to the background,
-// which de-dupes and pushes it to SC Feed. Works on a natural visit OR a pinned lobby tab.
+// FALLBACK source. The server fetches the MOTD itself with getMotd (it gates on lobby read access,
+// not moderator status). This script reads the rendered MOTD off the DOM whenever a testing-chat
+// lobby is open and hands it to the background, which pushes it to SC Feed; the server ignores it
+// while its own fetch is healthy. Works on a natural visit OR a pinned lobby tab.
 const api = globalThis.browser ?? globalThis.chrome
 
 // Spectrum lobby id (from the URL) → SC Feed channel id. Mirrors SPECTRUM_MOTDS on the backend.
