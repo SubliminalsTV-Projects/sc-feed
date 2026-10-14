@@ -13,6 +13,28 @@ export type PatchNote = {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    version: '0.1.3',
+    date: '2026-10-14',
+    title: 'SC Feed comes to Discord',
+    intro:
+      'Get Star Citizen news posted straight into your own Discord server.',
+    sections: [
+      {
+        heading: "What's new",
+        items: [
+          '**The SC Feed Discord bot** — add it to your server from sc-feed.subliminal.gg/bot, run /feed setup in a channel and choose what to follow: news, patch notes, the dev tracker, Spectrum announcements, RSI on X, server status, the official YouTube channel and the PTU MOTD. Each item is posted once, with a link to the original source and a button to open it in SC Feed.',
+          '**Role pings, your call** — /feed role sets a role to ping for a channel, or a different one for each category, or none. Up to five channels per server, each with its own selection.',
+        ],
+      },
+      {
+        heading: 'Fixes',
+        items: [
+          '**Old posts stay gone** — posts older than 30 days no longer come back for a minute after every refresh.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.1.2',
     date: '2026-09-16',
     title: 'Your dashboard, your way',

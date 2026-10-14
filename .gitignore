@@ -13,3 +13,6 @@ next-env.d.ts
 extension/dist-firefox/
 extension/web-ext-artifacts/
 sc-feed.code-workspace
+
+# discord bot bundle
+bot/dist/
