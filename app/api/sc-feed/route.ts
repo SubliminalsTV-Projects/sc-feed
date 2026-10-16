@@ -56,6 +56,15 @@ const DISCORD_CHANNELS = [
   { id: 'sc-leaks',   channel_id: '1484315527416647802' },
 ]
 const DISCORD_CHANNEL_ID_SET = new Set(DISCORD_CHANNELS.map(c => c.channel_id))
+// Channels the cron reads from a reader bot's private server (DISCORD_READ_CHANNELS, see the
+// cron's _shared.ts). Their msg_ids belong to that server, so a jump link into Sub's guild would
+// point at a message that isn't there. Those channels get no jump link.
+const READ_ELSEWHERE = (() => {
+  try {
+    const map: Record<string, string> = JSON.parse(process.env.DISCORD_READ_CHANNELS || '{}')
+    return new Set(DISCORD_CHANNELS.filter(c => map[c.id]).map(c => c.channel_id))
+  } catch { return new Set<string>() }
+})()
 
 // Channels to exclude from the feed — used for isolation testing
 const SKIP_CHANNELS = new Set<string>([
@@ -161,7 +170,7 @@ export async function GET() {
     const channels: FeedChannel[] = CHANNEL_ORDER.filter(ch => !SKIP_CHANNELS.has(ch.id)).map(ch => {
       const recs      = byChannel.get(ch.channel_id) ?? []
       const isDiscord = DISCORD_CHANNEL_ID_SET.has(ch.channel_id)
-      const guildId   = isDiscord ? (guildIds.get(ch.channel_id) ?? '') : ''
+      const guildId   = isDiscord && !READ_ELSEWHERE.has(ch.channel_id) ? (guildIds.get(ch.channel_id) ?? '') : ''
 
       const messages: FeedMessage[] = recs.map(r => {
         const discord_jump_url = isDiscord && guildId && r.msg_id

@@ -3,7 +3,8 @@ import { loadRsiToken } from '@/lib/rsi-token'
 import {
   DISCORD_BASE,
   DISCORD_CHANNELS,
-  DISCORD_TOKEN,
+  DISCORD_READ_CHANNELS,
+  DISCORD_READER_TOKEN,
   fetchCommLinkImage,
   fetchCommLinkBody,
   fetchRedditBody,
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
   const unauth = requireSecret(request)
   if (unauth) return unauth
 
-  if (!DISCORD_TOKEN) {
+  if (!DISCORD_READER_TOKEN) {
     await stampCronHeartbeat('discord', { ok: false, error: 'DISCORD_BOT_TOKEN not set' })
     return NextResponse.json({ error: 'DISCORD_BOT_TOKEN not set' }, { status: 500 })
   }
@@ -46,13 +47,20 @@ export async function GET(request: Request) {
 
   for (const ch of DISCORD_CHANNELS) {
     try {
+      const readId = DISCORD_READ_CHANNELS[ch.file_id] ?? ch.id
       const res = await fetch(
-        `${DISCORD_BASE}/channels/${ch.id}/messages?limit=50`,
-        { headers: { Authorization: DISCORD_TOKEN } }
+        `${DISCORD_BASE}/channels/${readId}/messages?limit=50`,
+        { headers: { Authorization: DISCORD_READER_TOKEN } }
       )
-      if (!res.ok) throw new Error(`Discord ${res.status} for channel ${ch.id}`)
+      if (!res.ok) throw new Error(`Discord ${res.status} for channel ${readId}`)
 
       const rawMsgs: DiscordMsg[] = await res.json()
+      // Without the Message Content intent Discord still returns every message, but with empty
+      // content, embeds and attachments. That parses to nothing and used to report ok:true count:0
+      // for a week (2026-10-09). An all-empty page is never a quiet channel; fail it loudly.
+      if (rawMsgs.length > 0 && rawMsgs.every(m => !m.content && !m.embeds?.length && !m.attachments?.length)) {
+        throw new Error(`blind: ${rawMsgs.length} messages in ${readId}, all empty (Message Content intent missing?)`)
+      }
       // Pipeline channels split long posts across multiple Discord messages — merge them
       // before parsing. cig-news bot stubs are independent and must NOT be merged.
       const msgs = ch.file_id === 'cig-news' ? rawMsgs : mergePipelineContinuations(rawMsgs)
