@@ -22,11 +22,25 @@ export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.sublim
 // host stored it: Coolify wraps any space-containing env value in single quotes and Docker keeps
 // them literal, and the env may or may not already include the "Bot " prefix. Strip surrounding
 // quotes, then ensure the "Bot " prefix. (Store the BARE token in Coolify — no space → no quoting.)
-const RAW_DISCORD_TOKEN = (process.env.DISCORD_BOT_TOKEN ?? '').trim().replace(/^['"]|['"]$/g, '')
-export const DISCORD_TOKEN = RAW_DISCORD_TOKEN
-  ? (/^Bot\s/i.test(RAW_DISCORD_TOKEN) ? RAW_DISCORD_TOKEN : `Bot ${RAW_DISCORD_TOKEN}`)
-  : ''
+function botAuth(env: string | undefined): string {
+  const raw = (env ?? '').trim().replace(/^['"]|['"]$/g, '')
+  return raw ? (/^Bot\s/i.test(raw) ? raw : `Bot ${raw}`) : ''
+}
+export const DISCORD_TOKEN = botAuth(process.env.DISCORD_BOT_TOKEN)
 export const DISCORD_BASE  = 'https://discord.com/api/v10'
+
+// Reading the source channels needs the Message Content intent, which Discord locks behind a
+// review for any bot in Sub's 10k-member guild (lost 2026-10-09, flight feedsrc). A separate
+// reader bot in a small private server can hold it, so the cron may read from there instead:
+//   DISCORD_READER_TOKEN  — that bot's token (falls back to DISCORD_BOT_TOKEN)
+//   DISCORD_READ_CHANNELS — JSON {file_id: channel id to read}, e.g. {"sc-news":"123…"}
+// Rows are still stored under the original channel id below, so history, the site, the owner
+// page and the public bot are unchanged. DISCORD_BOT_TOKEN stays for the guild lookup in
+// /api/sc-feed (jump links), which needs a bot in Sub's guild.
+export const DISCORD_READER_TOKEN = botAuth(process.env.DISCORD_READER_TOKEN) || DISCORD_TOKEN
+export const DISCORD_READ_CHANNELS: Record<string, string> = (() => {
+  try { return JSON.parse(process.env.DISCORD_READ_CHANNELS || '{}') } catch { return {} }
+})()
 
 export const DISCORD_CHANNELS = [
   { id: '1484315008216207450', label: 'SC News',           file_id: 'sc-news'    },
