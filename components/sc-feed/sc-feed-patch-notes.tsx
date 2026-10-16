@@ -102,12 +102,19 @@ function NoteEntry({ note }: { note: PatchNote }) {
   )
 }
 
-// Minimal inline formatter: **bold** only. Content is hard-coded in lib/patch-notes.ts so HTML escaping
-// is for defense-in-depth; bold is rendered as <strong>.
+// Minimal inline formatter: **bold** and [text](href). Content is hard-coded in lib/patch-notes.ts so HTML
+// escaping is for defense-in-depth. Links only allow site-relative paths (/x, not //x) or https:// URLs;
+// anything else is left as literal text. External links open in a new tab.
 function renderInline(text: string): string {
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  return escaped.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-on-surface font-black">$1</strong>')
+    .replace(/"/g, '&quot;')
+  return escaped
+    .replace(/\[([^\]]+)\]\((\/(?!\/)[^\s)]*|https:\/\/[^\s)]+)\)/g, (_, label: string, href: string) => {
+      const external = href.startsWith('https://') ? ' target="_blank" rel="noopener noreferrer"' : ''
+      return `<a href="${href}"${external} class="text-primary-container hover:underline">${label}</a>`
+    })
+    .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-on-surface font-black">$1</strong>')
 }
