@@ -6,9 +6,10 @@
  *   npx tsx scripts/feedcrypt-migrate.ts --verify   # decrypt every encrypted field; exit 1 on any failure
  *   npx tsx scripts/feedcrypt-migrate.ts --decrypt --apply   # ROLLBACK: back to plain text
  *   add --limit N to stop after N rows are changed (try a few first; re-run carries on)
+ *   --deliveries-only: just the bot dedupe-key step (run it as feedbot_app, which owns feedbot)
  *
- * Env: DATABASE_URL (a role that can UPDATE scfeed.sc_feed_messages, and feedbot.deliveries for
- * the dedupe step) and SCFEED_ENC_KEYS (the same value the apps use).
+ * Env: DATABASE_URL and SCFEED_ENC_KEYS (the same value the apps use). In production the messages
+ * step runs as scfeed_app and the dedupe step as feedbot_app (each owns its schema).
  *
  * Safe to re-run at any point, and safe while the cron is writing:
  * - Idempotent: a field that is already in the target state is left alone.
@@ -26,6 +27,7 @@ const args = new Set(process.argv.slice(2))
 const APPLY = args.has('--apply')
 const DECRYPT = args.has('--decrypt')
 const VERIFY = args.has('--verify')
+const DELIVERIES_ONLY = args.has('--deliveries-only')
 const BATCH = 200
 const LIMIT = (() => { const i = process.argv.indexOf('--limit'); return i > 0 ? Number(process.argv[i + 1]) : Infinity })()
 
@@ -39,7 +41,7 @@ async function main() {
 
   let after = 0
   const n = { rows: 0, changed: 0, raced: 0, alreadyDone: 0, encryptedFields: 0, plainFields: 0, failed: 0 }
-  while (n.changed < LIMIT) {
+  while (!DELIVERIES_ONLY && n.changed < LIMIT) {
     const rows = await sql<Row[]>`
       select id, msg_id, title, body, url, source, image from scfeed.sc_feed_messages
       where channel_id = any(${channels}) and id > ${after}
@@ -81,7 +83,7 @@ async function main() {
       else n.raced++
     }
   }
-  console.log(`messages: ${JSON.stringify(n)}`)
+  if (!DELIVERIES_ONLY) console.log(`messages: ${JSON.stringify(n)}`)
 
   // The public bot's delivery log keeps `url:…` / `title:…` dedupe keys for 45 days. Hash the
   // raw ones with the same keyed hash the bot now writes (bot/src/poller.ts). Not reversible,
