@@ -8,6 +8,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
 COPY lib/db.ts lib/db.ts
+COPY lib/feed-crypt.ts lib/feed-crypt.ts
 COPY bot bot
 # One self-contained file: the runtime image needs no node_modules.
 RUN npm run bot:build

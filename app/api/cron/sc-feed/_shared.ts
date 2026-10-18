@@ -16,6 +16,7 @@ import { rsiTokenValue } from '@/lib/rsi-token'
 import { setConfigValue } from '@/lib/sc-config'
 import { and, eq, lt, notInArray } from 'drizzle-orm'
 import { db, messages as messagesTbl, kbDiffs, kbSnapshots, pushSubscriptions } from '@/lib/db'
+import { aadFor, decryptValue, encryptRow, FeedDecryptError, keyring } from '@/lib/feed-crypt'
 
 export const PB_URL        = process.env.POCKETBASE_URL ?? 'https://mc-db.subliminal.gg'
 // Normalize the Discord bot token so it works as the Authorization header regardless of how the
@@ -623,6 +624,17 @@ export async function fetchSpectrumForumThreads(forumId: string, label: string, 
 
 // ---------- pocketbase upsert ----------
 
+/** Rows whose text came out of Discord message content: the four relay channels (stored under
+ *  their Discord channel id) and the RSI tweet relay, which the Minion reads from Discord and
+ *  POSTs to /api/sc-feed/ingest. Their content fields are encrypted at rest (lib/feed-crypt.ts).
+ *  Every other source is public web content and stays plain. */
+export const DISCORD_SOURCED_CHANNELS: ReadonlySet<string> = new Set([
+  ...DISCORD_CHANNELS.map(c => c.id),
+  'twitter-rsi',
+])
+
+let warnedNoKey = false
+
 export async function upsertMessage(
   channelId: string,
   channelLabel: string,
@@ -646,6 +658,14 @@ export async function upsertMessage(
     tsRaw:        isNaN(tsRaw.getTime()) ? new Date() : tsRaw,
     image:        msg.image ?? '',
     updated:      new Date(),
+  }
+  if (DISCORD_SOURCED_CHANNELS.has(channelId)) {
+    const ring = keyring()
+    if (ring) Object.assign(values, encryptRow(values, msg.msg_id, ring))
+    else if (!warnedNoKey) {
+      warnedNoKey = true
+      console.warn('[feed-crypt] SCFEED_ENC_KEYS not set: storing Discord-sourced text in PLAIN')
+    }
   }
 
   const existing = (await db.select({ id: messagesTbl.id }).from(messagesTbl)
@@ -1231,8 +1251,9 @@ export async function fetchStoredMessageBody(msgId: string): Promise<string> {
   try {
     const r = (await db.select({ body: messagesTbl.body }).from(messagesTbl)
       .where(eq(messagesTbl.msgId, msgId)).limit(1))[0]
-    return r?.body ?? ''
-  } catch {
+    return r?.body ? decryptValue(r.body, aadFor(msgId, 'body')) : ''
+  } catch (e) {
+    if (e instanceof FeedDecryptError) console.error(`[feed-crypt] ${e.message}`)
     return ''
   }
 }

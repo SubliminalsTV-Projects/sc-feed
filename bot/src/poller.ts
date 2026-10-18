@@ -16,6 +16,7 @@
 import { Routes, DiscordAPIError, type REST } from 'discord.js'
 import { and, arrayContains, asc, desc, eq, gt, inArray, lt, max, sql as dsql } from 'drizzle-orm'
 import { db, messages, kbDiffs } from '../../lib/db'
+import { blindHash, decryptRow } from '../../lib/feed-crypt'
 import { deliveries, state, subscriptions } from './schema'
 import { SOURCES, type CategoryId, type Source } from './sources'
 import { buildPost, type KbInfo, type MessageRow } from './embed'
@@ -138,14 +139,19 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
   if (Date.now() - row.tsRaw.getTime() > FRESH_MS) return 'stale'
 
   const kb = await kbInfoFor(row, source)
-  const key = dedupeKey(row, source, kb)
+  const rawKey = dedupeKey(row, source, kb)
+  // Dedupe keys hold urls and titles, so they are stored as a keyed hash (lib/feed-crypt.ts).
+  // The lookup also matches the raw form so rows written before encryption still dedupe;
+  // they age out of the 48h window on their own.
+  const key = blindHash(rawKey) ?? rawKey
+  const keys = key === rawKey ? [key] : [key, rawKey]
   const conds = [eq(subscriptions.paused, false), arrayContains(subscriptions.categories, [source.category])]
   if (allowlist.length) conds.push(inArray(subscriptions.guildId, allowlist))
   const subs = await db.select().from(subscriptions).where(and(...conds))
   if (!subs.length) return
 
   const alreadyHave = new Set((await db.select({ id: deliveries.subscriptionId }).from(deliveries)
-    .where(and(eq(deliveries.dedupeKey, key), gt(deliveries.created, DEDUPE_WINDOW),
+    .where(and(inArray(deliveries.dedupeKey, keys), gt(deliveries.created, DEDUPE_WINDOW),
       inArray(deliveries.subscriptionId, subs.map(s => s.id))))).map(r => r.id))
 
   const payload = buildPost(row, source, kb)
@@ -167,7 +173,8 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
       await recordFailure(sub, err)
     }
   })
-  log(`${row.channelId}/${row.msgId} "${row.title.slice(0, 60)}" → ${sent}/${subs.length} channels (${alreadyHave.size} already had it)`)
+  // No title here: container logs sit on the same unencrypted disk as the database.
+  log(`${row.channelId}/${row.msgId} → ${sent}/${subs.length} channels (${alreadyHave.size} already had it)`)
 }
 
 // ---------- loop ----------
@@ -182,7 +189,9 @@ async function tick(rest: REST, allowlist: string[]) {
   let stale = 0
   for (const row of rows) {
     try {
-      if (await deliver(rest, row, allowlist) === 'stale') stale++
+      // A row that will not decrypt (wrong or missing key) throws here and holds the cursor,
+      // so nothing is skipped: fix SCFEED_ENC_KEYS and the next tick carries on.
+      if (await deliver(rest, decryptRow(row, row.msgId), allowlist) === 'stale') stale++
     } catch (err) {
       // A DB error mid-item: stop here and retry this row next tick (claims make it safe).
       log(`deliver failed for id ${row.id}, retrying next tick:`, err)
@@ -221,7 +230,7 @@ export async function latestRowFor(categories: CategoryId[]): Promise<MessageRow
   if (!channels.length) return null
   const r = await db.select().from(messages).where(inArray(messages.channelId, channels))
     .orderBy(desc(messages.tsRaw)).limit(1)
-  return r[0] ?? null
+  return r[0] ? decryptRow(r[0], r[0].msgId) : null
 }
 
 export async function sendTestPost(rest: REST, channelId: string, categories: CategoryId[]) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { desc, inArray } from 'drizzle-orm'
 import { db, messages as messagesTbl, kbDiffs, kbSnapshots } from '@/lib/db'
+import { decryptRow } from '@/lib/feed-crypt'
 import { getStreamStates, isTwitchConfigured } from '@/lib/twitch'
 
 const DISCORD_BASE    = 'https://discord.com/api/v10'
@@ -140,11 +141,20 @@ export async function GET() {
         : Promise.resolve({}),
     ])
 
+    const undecryptable = new Map<string, number>()
     const allRecords: {
       id: string; channel_id: string; channel_label: string
       msg_id: string; title: string; body?: string; url: string; source: string
       msg_timestamp: string; ts_raw: string; image: string
-    }[] = rows.map(r => ({
+    }[] = rows.flatMap(r => {
+      // Discord-sourced rows are encrypted at rest (lib/feed-crypt.ts). A row that will not
+      // decrypt is dropped and its channel marked failed — never shown as ciphertext.
+      try { return [decryptRow(r, r.msgId)] } catch (e) {
+        console.error(`[feed-crypt] ${(e as Error).message}`)
+        undecryptable.set(r.channelId, (undecryptable.get(r.channelId) ?? 0) + 1)
+        return []
+      }
+    }).map(r => ({
       id: String(r.id), channel_id: r.channelId, channel_label: r.channelLabel,
       msg_id: r.msgId, title: r.title, body: r.body, url: r.url, source: r.source,
       msg_timestamp: r.msgTimestamp, ts_raw: r.tsRaw.toISOString(), image: r.image,
@@ -222,7 +232,11 @@ export async function GET() {
         }
       }
 
-      return { id: ch.id, label: ch.label, file: ch.id, messages, updated_at: messages[0]?.ts_raw ?? recs[0]?.ts_raw ?? null, rsiStatus }
+      const failed = undecryptable.get(ch.channel_id)
+      return {
+        id: ch.id, label: ch.label, file: ch.id, messages, updated_at: messages[0]?.ts_raw ?? recs[0]?.ts_raw ?? null, rsiStatus,
+        ...(failed ? { error: `${failed} item(s) could not be decrypted` } : {}),
+      }
     })
 
     // Enrich Knowledge Base cards (TrackerSC / cig-news, Zendesk article URLs). When the
