@@ -5,6 +5,7 @@
  *   npx tsx scripts/feedcrypt-migrate.ts --apply    # encrypt plain fields + hash bot dedupe keys
  *   npx tsx scripts/feedcrypt-migrate.ts --verify   # decrypt every encrypted field; exit 1 on any failure
  *   npx tsx scripts/feedcrypt-migrate.ts --decrypt --apply   # ROLLBACK: back to plain text
+ *   add --limit N to stop after N rows are changed (try a few first; re-run carries on)
  *
  * Env: DATABASE_URL (a role that can UPDATE scfeed.sc_feed_messages, and feedbot.deliveries for
  * the dedupe step) and SCFEED_ENC_KEYS (the same value the apps use).
@@ -26,6 +27,7 @@ const APPLY = args.has('--apply')
 const DECRYPT = args.has('--decrypt')
 const VERIFY = args.has('--verify')
 const BATCH = 200
+const LIMIT = (() => { const i = process.argv.indexOf('--limit'); return i > 0 ? Number(process.argv[i + 1]) : Infinity })()
 
 type Row = { id: number; msg_id: string } & Record<(typeof ENC_FIELDS)[number], string>
 
@@ -37,13 +39,14 @@ async function main() {
 
   let after = 0
   const n = { rows: 0, changed: 0, raced: 0, alreadyDone: 0, encryptedFields: 0, plainFields: 0, failed: 0 }
-  for (;;) {
+  while (n.changed < LIMIT) {
     const rows = await sql<Row[]>`
       select id, msg_id, title, body, url, source, image from scfeed.sc_feed_messages
       where channel_id = any(${channels}) and id > ${after}
       order by id limit ${BATCH}`
     if (!rows.length) break
     for (const r of rows) {
+      if (n.changed >= LIMIT) break
       after = r.id
       n.rows++
       const next: Partial<Row> = {}
