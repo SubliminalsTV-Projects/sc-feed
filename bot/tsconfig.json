@@ -11,5 +11,5 @@
     "esModuleInterop": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*.ts", "../lib/db.ts"]
+  "include": ["src/**/*.ts", "../lib/db.ts", "../lib/feed-crypt.ts"]
 }

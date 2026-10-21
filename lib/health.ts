@@ -5,6 +5,7 @@
 
 import { like } from 'drizzle-orm'
 import { db, sql, config } from './db'
+import { aadFor, decryptValue } from './feed-crypt'
 
 export type DbHealth = { ok: boolean; latencyMs: number | null; error?: string }
 export type SourceHealth = {
@@ -62,6 +63,16 @@ const EMPTY_COUNTS: Counts = {
   messagesTotal: 0, messages24h: 0, kbSnapshots: 0, kbDiffs: 0, kbLastDiff: null, saved: 0, pushSubs: 0,
 }
 
+// Discord-sourced urls are encrypted at rest (lib/feed-crypt.ts). One that will not decrypt is
+// logged and shown as no link, never as ciphertext.
+function lastUrlOf(url: string | null, msgId: string): string {
+  if (!url) return ''
+  try { return decryptValue(url, aadFor(msgId, 'url')) } catch (e) {
+    console.error(`[feed-crypt] ${(e as Error).message}`)
+    return ''
+  }
+}
+
 export async function getHealth(): Promise<Health> {
   // DB connectivity + round-trip latency. If this fails nothing else can run, so short-circuit.
   const t0 = Date.now()
@@ -80,6 +91,7 @@ export async function getHealth(): Promise<Health> {
       select distinct on (m.channel_id)
              m.channel_id,
              m.url     as last_url,
+             m.msg_id  as last_msg_id,
              m.ts_raw  as last_ts,
              c.count_24h,
              c.total
@@ -118,7 +130,7 @@ export async function getHealth(): Promise<Health> {
   const sources: SourceHealth[] = sourceRows
     .map((r) => {
       const last = r.last_ts ? new Date(r.last_ts as string) : null
-      const url = (r.last_url as string) || ''
+      const url = lastUrlOf(r.last_url as string, r.last_msg_id as string)
       return {
         channelId: r.channel_id as string,
         label: SOURCE_LABELS[r.channel_id as string] ?? (r.channel_id as string),
