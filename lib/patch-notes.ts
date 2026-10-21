@@ -13,6 +13,25 @@ export type PatchNote = {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    version: '0.1.4',
+    date: '2026-10-21',
+    title: 'Quiet fixes',
+    sections: [
+      {
+        heading: 'Fixes',
+        items: [
+          "**Links in What's New work** — links in these notes now open instead of showing as plain text.",
+        ],
+      },
+      {
+        heading: 'Under the hood',
+        items: [
+          '**Stored Discord posts are encrypted** — news relayed from Discord is now encrypted in our database. Nothing changes in how the feed looks.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.1.3',
     date: '2026-10-14',
     title: 'SC Feed comes to Discord',

@@ -169,6 +169,7 @@ npm run dev
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | Twitch app credentials for live-status polling |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push VAPID keypair (`npx web-push generate-vapid-keys`) |
 | `AUTH_SECRET`, `AUTH_GOOGLE_*`, `DISCORD_OAUTH_*` | Optional sign-in (NextAuth v5). See `.env.example` |
+| `SCFEED_ENC_KEYS` | Optional. `id:base64,…` AES-256 keys; Discord-sourced feed text is encrypted at rest with the first, any can decrypt. Unset = stored plain |
 
 ### 4. Deploy
 
