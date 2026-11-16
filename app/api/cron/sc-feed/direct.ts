@@ -19,6 +19,7 @@ import { SPECTRUM_HEADERS } from './_shared'
 export const DIRECT_CHANNELS = {
   commlink: { id: 'rsi-commlink',     label: 'Comm-Links (direct)'  },
   devpost:  { id: 'spectrum-devpost', label: 'Dev Tracker (direct)' },
+  reddit:   { id: 'reddit-devpost',   label: 'Reddit devs (direct)' },
 } as const
 
 const RSI = 'https://robertsspaceindustries.com'
@@ -166,4 +167,80 @@ export function staffHitToRow(h: StaffHit): DirectRow | null {
     ts_raw: ts,
     image: '',
   }
+}
+
+// ---------- Reddit dev posts (via Arctic Shift) ----------
+//
+// Reddit itself is closed to us: unauthenticated .json is 403, new Data API access stopped being
+// granted on 2026-10-31, and Reddit announced RSS ends 2026-11-13 (per-user RSS still answered on
+// 11-16, with 429s after ~2 requests). Arctic Shift is a free public Reddit archive with a search
+// API (github.com/ArthurHeitmann/arctic_shift). No login; asks callers to be considerate (we make
+// 2 requests per run). Comments land there ~20–40 min after posting (measured 2026-11-16).
+// It is a third party that itself depends on Reddit, so it can disappear; the gap check and the
+// heartbeat are how we'd notice.
+//
+// r/starcitizen gives CIG staff an official user flair: "CIG Employee" or "CIG - <team>". That flair
+// is the filter, so devs posting from personal accounts (Nicou12313, Koaku…) are caught too.
+
+const ARCTIC = 'https://arctic-shift.photon-reddit.com/api'
+const ARCTIC_UA = 'linux:sc-feed-devtracker:v0.1 (public news feed reader)'
+const CIG_FLAIR_RE = /^\s*CIG(\s+Employee\b|\s*-\s*\S)/i
+
+export function isCigFlair(flair: string | null | undefined): boolean {
+  return CIG_FLAIR_RE.test(flair ?? '')
+}
+
+interface ArcticItem {
+  id: string; author: string; author_flair_text?: string | null; created_utc: number; permalink: string
+  body?: string; link_title?: string          // comments
+  title?: string; selftext?: string           // posts
+}
+
+// A flair search is a keyword search, which is expensive there: unbounded, it timed out (HTTP 422
+// "Timeout. Maybe slow down a bit"); bounded to the last 6 h it answered in ~4 s. 6 h also rides
+// out several failed runs. The archive's lag is ~20–40 min, so nothing falls outside the window.
+const REDDIT_WINDOW_S = 6 * 3600
+
+async function arctic(kind: 'comments' | 'posts'): Promise<ArcticItem[]> {
+  const after = Math.floor(Date.now() / 1000) - REDDIT_WINDOW_S
+  const res = await fetch(`${ARCTIC}/${kind}/search?subreddit=starcitizen&author_flair_text=CIG&after=${after}&limit=100&sort=desc`, {
+    headers: { 'User-Agent': ARCTIC_UA, 'Accept': 'application/json' },
+  })
+  if (!res.ok) throw new Error(`Arctic Shift ${kind} HTTP ${res.status}`)
+  const j = await res.json()
+  if (j.error) throw new Error(`Arctic Shift ${kind}: ${j.error}`)
+  return j.data ?? []
+}
+
+/** Newest r/starcitizen comments + posts by CIG-flaired accounts, as cards. */
+export async function fetchRedditStaff(): Promise<DirectRow[]> {
+  const rows: DirectRow[] = []
+  // One after the other: two heavy queries at once is what trips its limiter.
+  const comments = await arctic('comments')
+  const posts = await arctic('posts')
+  for (const c of comments) {
+    if (!isCigFlair(c.author_flair_text) || !c.body || c.body === '[deleted]' || c.body === '[removed]') continue
+    const ts = new Date(c.created_utc * 1000).toISOString()
+    rows.push({
+      msg_id: `devpost-reddit-${c.id}`,
+      title: c.link_title ?? 'r/starcitizen',
+      body: c.body.trim().slice(0, 2000),
+      url: `https://www.reddit.com${c.permalink}`,
+      source: `Reddit||${c.author}`,
+      msg_timestamp: ts, ts_raw: ts, image: '',
+    })
+  }
+  for (const p of posts) {
+    if (!isCigFlair(p.author_flair_text) || !p.title) continue
+    const ts = new Date(p.created_utc * 1000).toISOString()
+    rows.push({
+      msg_id: `devpost-reddit-${p.id}`,
+      title: p.title,
+      body: (p.selftext ?? '').trim().slice(0, 2000),
+      url: `https://www.reddit.com${p.permalink}`,
+      source: `Reddit||${p.author}`,
+      msg_timestamp: ts, ts_raw: ts, image: '',
+    })
+  }
+  return rows
 }

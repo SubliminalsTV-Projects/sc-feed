@@ -10,12 +10,14 @@ import {
 import {
   DIRECT_CHANNELS,
   fetchCommLinkListing,
+  fetchRedditStaff,
   fetchStaffPosts,
   parseTimeAgo,
   staffHitToRow,
   storedRow,
   type DirectRow,
 } from '../direct'
+import { checkTrackerGaps } from '../direct-gaps'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,8 +91,25 @@ export async function GET(request: Request) {
     results.devpost = { ok: false, error: String(err) }
   }
 
+  // ── Reddit dev posts (Arctic Shift archive) ──
+  try {
+    const rows = await fetchRedditStaff()
+    let added = 0
+    for (const row of rows) {
+      if (await upsertMessage(DIRECT_CHANNELS.reddit.id, DIRECT_CHANNELS.reddit.label, row)) added++
+    }
+    results.reddit = { ok: true, count: rows.length, added }
+  } catch (err) {
+    results.reddit = { ok: false, error: String(err) }
+  }
+
   const ok = Object.values(results).every((r) => (r as { ok?: boolean }).ok !== false)
   const count = Object.values(results).reduce<number>((n, r) => n + ((r as { count?: number }).count ?? 0), 0)
-  await stampCronHeartbeat('direct', { ok, count, channels: results })
-  return NextResponse.json({ ok, channels: results })
+
+  // Side-by-side: flag anything TrackerSC relayed that we still lack (see ../direct-gaps.ts).
+  let gaps: unknown
+  try { gaps = await checkTrackerGaps() } catch (err) { gaps = { error: String(err) } }
+
+  await stampCronHeartbeat('direct', { ok, count, channels: results, gaps })
+  return NextResponse.json({ ok, channels: results, gaps })
 }

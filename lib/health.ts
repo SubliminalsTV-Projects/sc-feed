@@ -59,6 +59,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'twitter-rsi':           'RSI Twitter',
   'rsi-commlink':          'Comm-Links (direct, shadow)',
   'spectrum-devpost':      'Dev Tracker (direct, shadow)',
+  'reddit-devpost':        'Reddit devs (direct, shadow)',
 }
 
 const EMPTY_COUNTS: Counts = {
