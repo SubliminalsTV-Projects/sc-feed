@@ -5,9 +5,13 @@ posts an embed for every new Star Citizen news item that reaches SC Feed.
 
 - **Discord app:** "SC Feed", id `1484283647027712232` (the bot user is `SC News#7087`; renaming a
   verified app's bot needs Discord support). Guild install only, scopes `bot applications.commands`,
-  permissions `19456` (View Channels, Send Messages, Embed Links). No privileged intents.
-  The ping menu (`/feed menu`) also needs **Manage Roles**, and **Pin Messages** to pin itself. Without
-  Manage Roles the command explains what's missing and `/feed role` stays the way to ping.
+  permissions `2251800082140160` (View Channels, Send Messages, Embed Links, Manage Roles, Pin
+  Messages; was `19456` until 2026-11-16, Sub's OK). No privileged intents. Manage Roles and Pin
+  Messages are only used by the ping menu (`/feed menu`). Servers that added the bot earlier don't have
+  them: without Manage Roles the command explains what's missing and `/feed role` stays the way to ping.
+  The number lives in the portal's Installation → Default Install Settings (the invite link has no
+  `permissions=`); the bot token can change it with `PATCH /applications/@me` (`install_params` and
+  `integration_types_config.0.oauth2_install_params`).
 - **Invite:** https://discord.com/oauth2/authorize?client_id=1484283647027712232 (also on `/bot`).
 - **Public pages:** `/bot`, `/bot/privacy`, `/bot/terms` on sc-feed.subliminal.gg (in `app/bot/`).
 
