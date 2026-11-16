@@ -5,7 +5,11 @@
 //   DATABASE_URL       postgres://feedbot_app:…@<timescale>:5432/subliminal
 //   FEEDBOT_GUILD_IDS  optional, comma-separated. When set the bot ONLY serves these servers
 //                      (commands answer "not available" elsewhere, nothing is posted elsewhere).
-//                      Used for testing in Sub's server; unset in production.
+//                      Used for testing in Sub's server; unset in production. It also limits
+//                      the startup category migration to these servers.
+//   FEEDBOT_NO_POLLER  optional. "1" = answer commands and menus but post no news. For a test copy
+//                      run while the production bot is stopped: the shared cursor doesn't move, so
+//                      production catches up on restart and no other server misses a post.
 
 import { Client, Events, GatewayIntentBits } from 'discord.js'
 import { eq, sql as dsql } from 'drizzle-orm'
@@ -22,6 +26,7 @@ const token = process.env.DISCORD_TOKEN?.trim().replace(/^Bot\s+/i, '')
 if (!token) throw new Error('DISCORD_TOKEN is not set')
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set')
 const allowlist = (process.env.FEEDBOT_GUILD_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean)
+const noPoller = process.env.FEEDBOT_NO_POLLER === '1'
 
 // Guilds is the only intent needed: slash commands arrive as interactions, and it carries the
 // guild/channel/role events we react to. No privileged intents — keeps verification simple.
@@ -35,7 +40,8 @@ client.once(Events.ClientReady, async c => {
     await db.insert(guilds).values({ guildId: g.id, name: g.name })
       .onConflictDoUpdate({ target: guilds.guildId, set: { name: g.name, leftAt: null } })
   }
-  stopPoller = startPoller(c.rest, allowlist)
+  if (noPoller) log('FEEDBOT_NO_POLLER=1 — not posting news')
+  else stopPoller = startPoller(c.rest, allowlist)
 })
 
 client.on(Events.GuildCreate, safe(async g => {
@@ -69,7 +75,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'))
 process.on('SIGINT', () => void shutdown('SIGINT'))
 
 async function main() {
-  await migrate()
+  await migrate(allowlist)
   await client.login(token)
 }
 main().catch(err => { console.error(err); process.exit(1) })

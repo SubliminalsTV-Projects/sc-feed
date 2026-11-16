@@ -71,7 +71,7 @@ export const state = feedbot.table('state', {
 })
 
 // Idempotent DDL, applied at startup. Mirrors the Drizzle definitions above — keep in step.
-export async function migrate() {
+export async function migrate(allowlist: string[] = []) {
   await sql.unsafe(`
     SET client_min_messages = warning;  -- silence "already exists, skipping" on every boot
     CREATE TABLE IF NOT EXISTS feedbot.subscriptions (
@@ -124,7 +124,7 @@ export async function migrate() {
       updated    timestamptz NOT NULL DEFAULT now()
     );
   `)
-  await migrateCategories()
+  await migrateCategories(allowlist)
 }
 
 // 2026-11-16: categories were split per row (sources.ts LEGACY_CATEGORIES). Rewrite any
@@ -142,9 +142,12 @@ export function upgradeCategoryRoles(roles: Record<string, string>): Record<stri
   return out
 }
 
-async function migrateCategories() {
+async function migrateCategories(allowlist: string[]) {
   const rows = await db.select().from(subscriptions)
   for (const s of rows) {
+    // A test copy (FEEDBOT_GUILD_IDS set) must not rewrite other servers' settings: the
+    // production bot still running the old code would then miss their feeds.
+    if (allowlist.length && !allowlist.includes(s.guildId)) continue
     if (!s.categories.some(c => LEGACY_CATEGORIES[c]) && !Object.keys(s.categoryRoles).some(c => LEGACY_CATEGORIES[c])) continue
     const categories = upgradeCategories(s.categories)
     const categoryRoles = upgradeCategoryRoles(s.categoryRoles)
