@@ -12,14 +12,21 @@
 // - Delivery log: claim (subscription, msg_id) before sending → at most one post per item.
 // - dedupe_key: the same story arrives from several sources (Pipeline + Spectrum patch notes,
 //   Pipeline MOTD relays + the scraped MOTD). One post per channel per story per 48h.
+// - Store bursts (Sub, 2026-11-16): TrackerSC posts one store change as several messages, plus
+//   ship-upgrade and merch lists. A store row joins a burst when its own timestamp is within
+//   BURST_MS of a row already in it (measured: bursts are 6-74 s apart inside, 143 s+ between).
+//   A burst in one batch is one post with one ping. sc-feed reads TrackerSC every 10 minutes, so
+//   part of a burst can arrive a cycle later: that part EDITS the post its burst already made
+//   (no new ping) instead of holding the cursor, which would delay every other feed. Every row
+//   is claimed with the post's message id, so a retry can't post part of a burst again.
 
 import { Routes, DiscordAPIError, type REST } from 'discord.js'
-import { and, arrayContains, asc, desc, eq, gt, inArray, lt, max, sql as dsql } from 'drizzle-orm'
+import { and, arrayContains, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, max, notInArray, sql as dsql } from 'drizzle-orm'
 import { db, messages, kbDiffs } from '../../lib/db'
 import { blindHash, decryptRow } from '../../lib/feed-crypt'
 import { deliveries, menus, state, subscriptions } from './schema'
 import { type CategoryId } from './sources'
-import { buildPost, type Extras, type KbInfo, type MessageRow } from './embed'
+import { buildBurstPost, buildPost, type Extras, type KbInfo, type MessageRow } from './embed'
 import { channelsFor, classify, type Classified } from './classify'
 import { commLinkSummary } from './lookups'
 
@@ -29,6 +36,8 @@ const DEDUPE_WINDOW = dsql`now() - interval '48 hours'`
 const DELIVERY_RETENTION = dsql`now() - interval '45 days'`
 const MAX_PERMANENT_ERRORS = 3
 const SEND_CONCURRENCY = 10
+const BURST_MS = 90_000
+const BURST_LOOKAROUND_MS = 10 * 60_000
 const SPECTRUM_THREAD_RE = /robertsspaceindustries\.com\/spectrum\/.*\/thread\//
 
 // Discord error codes meaning "this channel will never accept our posts as configured".
@@ -150,9 +159,10 @@ async function extrasFor(row: MessageRow, cls: Classified): Promise<Extras> {
   return { kb, summary }
 }
 
-async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promise<'stale' | void> {
+// `group` is the row plus, for a store burst, the rest of the burst (see the header).
+async function deliver(rest: REST, group: Item[], allowlist: string[]): Promise<'stale' | void> {
+  const { row, cls } = group[0]
   if (Date.now() - row.tsRaw.getTime() > FRESH_MS) return 'stale'
-  const cls = await classify(row)
   if (!cls) return
 
   const extras = await extrasFor(row, cls)
@@ -171,29 +181,102 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
     .where(and(inArray(deliveries.dedupeKey, keys), gt(deliveries.created, DEDUPE_WINDOW),
       inArray(deliveries.subscriptionId, subs.map(s => s.id))))).map(r => r.id))
 
-  const payload = buildPost(row, cls, extras)
+  const payload = group.length > 1 ? buildBurstPost(burstCards(group)) : buildPost(row, cls, extras)
+  const neighbours = cls.card === 'store' ? await storedNeighbours(group) : []
   const guildMenus = new Map((await db.select({ guildId: menus.guildId, roles: menus.roles }).from(menus)
     .where(inArray(menus.guildId, [...new Set(subs.map(s => s.guildId))]))).map(m => [m.guildId, m.roles]))
   let sent = 0
+  let edited = 0
   await pool(subs.filter(s => !alreadyHave.has(s.id)), SEND_CONCURRENCY, async sub => {
+    const prior = neighbours.length ? await priorBurstPost(sub.id, neighbours) : null
     const claim = await db.insert(deliveries)
-      .values({ subscriptionId: sub.id, msgId: row.msgId, dedupeKey: key })
-      .onConflictDoNothing().returning({ id: deliveries.id })
-    if (!claim.length) return
+      .values(group.map(g => ({ subscriptionId: sub.id, msgId: g.row.msgId, dedupeKey: key, discordMessageId: prior?.messageId ?? null })))
+      .onConflictDoNothing().returning({ id: deliveries.id, msgId: deliveries.msgId })
+    // The lead row's claim decides: no claim = this channel already had this post (or this
+    // burst), even if a later row of it was claimed just now.
+    if (!claim.some(c => c.msgId === row.msgId)) return
+    const ids = claim.map(c => c.id)
+    if (prior) {
+      try {
+        await rest.patch(Routes.channelMessage(sub.channelId, prior.messageId), { body: buildBurstPost(burstCards([...prior.members, ...group])) })
+        edited++
+        return
+      } catch (err) {
+        log(`burst edit failed in ${sub.channelId} (${describeError(err)}), posting instead`)
+      }
+    }
     try {
       const res = await rest.post(Routes.channelMessages(sub.channelId), { body: { ...payload, ...roleMention(sub, cls.feed, guildMenus.get(sub.guildId)) } }) as { id: string }
-      await db.update(deliveries).set({ discordMessageId: res.id }).where(eq(deliveries.id, claim[0].id))
+      await db.update(deliveries).set({ discordMessageId: res.id }).where(inArray(deliveries.id, ids))
       if (sub.errorCount) {
         await db.update(subscriptions).set({ errorCount: 0, lastError: '', updated: new Date() }).where(eq(subscriptions.id, sub.id))
       }
       sent++
     } catch (err) {
-      await db.update(deliveries).set({ error: describeError(err) }).where(eq(deliveries.id, claim[0].id))
+      await db.update(deliveries).set({ error: describeError(err) }).where(inArray(deliveries.id, ids))
       await recordFailure(sub, err)
     }
   })
   // No title here: container logs sit on the same unencrypted disk as the database.
-  log(`${row.channelId}/${row.msgId} [${cls.feed}] → ${sent}/${subs.length} channels (${alreadyHave.size} already had it)`)
+  log(`${row.channelId}/${row.msgId}${group.length > 1 ? ` (+${group.length - 1} in burst)` : ''} [${cls.feed}] → ${sent}/${subs.length} channels` +
+    `${edited ? `, ${edited} added to an earlier burst post` : ''} (${alreadyHave.size} already had it)`)
+}
+
+// ---------- store bursts ----------
+
+export interface Item { row: MessageRow, cls: Classified | null }
+
+/** Grows `seed` with every store row in `candidates` chained to it within BURST_MS. */
+export function chainBurst(seed: Item[], candidates: Item[]): Item[] {
+  const out = [...seed]
+  const pool = candidates.filter(c => c.cls?.card === 'store' && c.row.channelId === seed[0].row.channelId && !out.includes(c))
+  for (let grew = true; grew;) {
+    grew = false
+    for (const c of pool) {
+      if (out.includes(c)) continue
+      if (out.some(o => Math.abs(o.row.tsRaw.getTime() - c.row.tsRaw.getTime()) <= BURST_MS)) { out.push(c); grew = true }
+    }
+  }
+  return out
+}
+
+/** Indexes of the batch rows that form a burst with items[start] (just [start] if not store). */
+export function burstFor(items: Item[], start: number, used: Set<number>): number[] {
+  if (items[start].cls?.card !== 'store') return [start]
+  const later = items.map((it, j) => ({ it, j })).filter(({ j }) => j > start && !used.has(j))
+  const chosen = chainBurst([items[start]], later.map(l => l.it))
+  return [start, ...later.filter(l => chosen.includes(l.it)).map(l => l.j)]
+}
+
+const burstCards = (items: Item[]) => [...items]
+  .sort((a, b) => a.row.tsRaw.getTime() - b.row.tsRaw.getTime())
+  .map(i => ({ row: i.row, cls: i.cls! }))
+
+/** Store rows already in the DB (from an earlier sc-feed cycle) that chain to this burst. */
+export async function storedNeighbours(group: Item[]): Promise<Item[]> {
+  const ts = group.map(g => g.row.tsRaw.getTime())
+  const rows = await db.select().from(messages).where(and(
+    eq(messages.channelId, group[0].row.channelId),
+    gte(messages.tsRaw, new Date(Math.min(...ts) - BURST_LOOKAROUND_MS)),
+    lte(messages.tsRaw, new Date(Math.max(...ts) + BURST_LOOKAROUND_MS)),
+    notInArray(messages.msgId, group.map(g => g.row.msgId))))
+  const near: Item[] = []
+  for (const raw of rows) {
+    const r = decryptRow(raw, raw.msgId)
+    near.push({ row: r, cls: await classify(r) })
+  }
+  return chainBurst(group, near).filter(i => !group.includes(i))
+}
+
+/** The post this channel already made for part of the burst, and which rows it holds. */
+export async function priorBurstPost(subscriptionId: number, neighbours: Item[]) {
+  const got = await db.select({ msgId: deliveries.msgId, messageId: deliveries.discordMessageId }).from(deliveries)
+    .where(and(eq(deliveries.subscriptionId, subscriptionId), isNotNull(deliveries.discordMessageId),
+      inArray(deliveries.msgId, neighbours.map(n => n.row.msgId))))
+  if (!got.length) return null
+  const messageId = got[0].messageId!
+  const inPost = new Set(got.filter(g => g.messageId === messageId).map(g => g.msgId))
+  return { messageId, members: neighbours.filter(n => inPost.has(n.row.msgId)) }
 }
 
 // ---------- loop ----------
@@ -206,15 +289,32 @@ async function tick(rest: REST, allowlist: string[]) {
     .where(and(gt(messages.id, cursor), lt(messages.created, dsql`now() - interval '30 seconds'`)))
     .orderBy(asc(messages.id)).limit(500)
   let stale = 0
-  for (const row of rows) {
+  // Decrypt + classify the batch first (a burst looks ahead). A row that will not decrypt
+  // (wrong or missing key) ends the batch there and holds the cursor, so nothing is skipped:
+  // fix SCFEED_ENC_KEYS and the next tick carries on.
+  const items: Item[] = []
+  for (const raw of rows) {
     try {
-      // A row that will not decrypt (wrong or missing key) throws here and holds the cursor,
-      // so nothing is skipped: fix SCFEED_ENC_KEYS and the next tick carries on.
-      if (await deliver(rest, decryptRow(row, row.msgId), allowlist) === 'stale') stale++
+      const row = decryptRow(raw, raw.msgId)
+      items.push({ row, cls: await classify(row) })
     } catch (err) {
-      // A DB error mid-item: stop here and retry this row next tick (claims make it safe).
-      log(`deliver failed for id ${row.id}, retrying next tick:`, err)
+      log(`row ${raw.id} could not be read, holding here:`, err)
       break
+    }
+  }
+  const used = new Set<number>()
+  for (let idx = 0; idx < items.length; idx++) {
+    const row = items[idx].row
+    if (!used.has(idx)) {
+      const burst = burstFor(items, idx, used)
+      try {
+        if (await deliver(rest, burst.map(j => items[j]), allowlist) === 'stale') stale++
+      } catch (err) {
+        // A DB error mid-item: stop here and retry this row next tick (claims make it safe).
+        log(`deliver failed for id ${row.id}, retrying next tick:`, err)
+        break
+      }
+      for (const j of burst) used.add(j)
     }
     cursor = row.id
   }

@@ -7,7 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js'
 import type { messages } from '../../lib/db'
 import type { Classified } from './classify'
-import { SITE_URL, baseEmbed, clip, commLinkCard, devCard, isHttp, storeCard, videoCard } from './cards'
+import { SITE_URL, baseEmbed, clip, commLinkCard, devCard, isHttp, storeBurstCard, storeCard, videoCard } from './cards'
 
 export type MessageRow = typeof messages.$inferSelect
 
@@ -85,6 +85,15 @@ export function buildPost(row: MessageRow, cls: Classified, extras: Extras) {
     : cls.card === 'store' ? storeCard(row, cls)
     : genericCard(row, cls, extras.kb)
 
+  return withButton(embed)
+}
+
+/** One post for a store burst (several store rows within a minute; see poller.ts). */
+export function buildBurstPost(items: { row: MessageRow, cls: Classified }[]) {
+  return withButton(storeBurstCard(items))
+}
+
+function withButton(embed: ReturnType<typeof baseEmbed>) {
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open in SC Feed').setURL(SITE_URL),
   )

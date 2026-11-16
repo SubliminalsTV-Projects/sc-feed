@@ -143,3 +143,38 @@ export function storeCard(row: MessageRow, cls: Classified) {
   setImage(embed, row.image)
   return embed
 }
+
+// A store burst (poller.ts): several store / ship upgrade / merch posts within a minute, as one
+// card. One section per kind, in the order they arrived, then one list budget for all of them.
+const BURST_DESCRIPTION_MAX = 3500
+
+export function storeBurstCard(items: { row: MessageRow, cls: Classified }[]) {
+  const sections = new Map<string, string[]>()
+  for (const { row, cls } of items) {
+    const label = cls.storeLabel ?? cls.source.label
+    sections.set(label, [...(sections.get(label) ?? []), ...(row.body ?? '').trim().split('\n').filter(l => l.trim())])
+  }
+  const isItem = (l: string) => /^\s*[-*]\s+/.test(l)
+  const total = [...sections.values()].reduce((n, ls) => n + ls.filter(isItem).length, 0)
+
+  const lead = items[0]
+  const embed = baseEmbed(lead.row, lead.cls)
+  const labels = [...sections.keys()]
+  embed.setAuthor({ name: labels.join(' · ').slice(0, 256) })
+  embed.setTitle(clip(`${labels.join(' and ')}: ${total} change${total === 1 ? '' : 's'}`, 256))
+  embed.setURL(STORE_URL)
+
+  let out = ''
+  let hidden = 0
+  for (const [label, lines] of sections) {
+    const head = `${out ? '\n\n' : ''}__**${label}**__ · ${summarizeStore(lines.join('\n'))}`
+    if (out.length + head.length > BURST_DESCRIPTION_MAX) { hidden += lines.filter(isItem).length; continue }
+    out += head
+    for (const line of lines) {
+      if (out.length + line.length + 1 > BURST_DESCRIPTION_MAX) { if (isItem(line)) hidden++; continue }
+      out += '\n' + line
+    }
+  }
+  embed.setDescription(hidden ? `${out}\n…and ${hidden} more` : out)
+  return embed
+}
