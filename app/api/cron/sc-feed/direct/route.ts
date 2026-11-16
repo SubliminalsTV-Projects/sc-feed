@@ -18,11 +18,14 @@ import {
   type DirectRow,
 } from '../direct'
 import { checkTrackerGaps } from '../direct-gaps'
+import { getConfigValue, setConfigValue } from '@/lib/sc-config'
 
 export const dynamic = 'force-dynamic'
 
 // A dev post edited within this window is re-enriched; older ones keep their stored body.
 const REENRICH_MS = 2 * 60 * 60 * 1000
+// Reddit counts as failing only after this long with neither Arctic Shift search getting through.
+const REDDIT_STALE_MS = 2 * 60 * 60 * 1000
 
 // Shadow mode: no push notifications from this route. The same posts still arrive through
 // TrackerSC (cig-news) until these channels replace it.
@@ -93,12 +96,17 @@ export async function GET(request: Request) {
 
   // ── Reddit dev posts (Arctic Shift archive) ──
   try {
-    const rows = await fetchRedditStaff()
+    const { rows, errors } = await fetchRedditStaff()
     let added = 0
     for (const row of rows) {
       if (await upsertMessage(DIRECT_CHANNELS.reddit.id, DIRECT_CHANNELS.reddit.label, row)) added++
     }
-    results.reddit = { ok: true, count: rows.length, added }
+    // A refused search is routine (see fetchRedditStaff). Only call it a failure once nothing
+    // has come through for REDDIT_STALE_MS.
+    const now = Date.now()
+    if (errors.length < 2) await setConfigValue('direct_reddit_last_ok', new Date(now).toISOString(), { updated_via: 'cron' })
+    const lastOk = Date.parse(await getConfigValue('direct_reddit_last_ok').catch(() => '') || '') || 0
+    results.reddit = { ok: now - lastOk < REDDIT_STALE_MS, count: rows.length, added, ...(errors.length ? { skipped: errors } : {}) }
   } catch (err) {
     results.reddit = { ok: false, error: String(err) }
   }

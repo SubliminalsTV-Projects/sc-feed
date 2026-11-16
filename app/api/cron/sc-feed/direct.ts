@@ -212,12 +212,17 @@ async function arctic(kind: 'comments' | 'posts'): Promise<ArcticItem[]> {
   return j.data ?? []
 }
 
-/** Newest r/starcitizen comments + posts by CIG-flaired accounts, as cards. */
-export async function fetchRedditStaff(): Promise<DirectRow[]> {
+/** Newest r/starcitizen comments + posts by CIG-flaired accounts, as cards.
+ *  Arctic Shift turns away ~1 in 3 of these searches when it is busy, even at our 10-min cadence
+ *  (5 of 8 OK, 2026-11-16; refusals take ~0.3 s). The 6 h window means the next run catches up,
+ *  so a refusal is returned in `errors` rather than thrown, and one kind failing keeps the other. */
+export async function fetchRedditStaff(): Promise<{ rows: DirectRow[]; errors: string[] }> {
   const rows: DirectRow[] = []
+  const errors: string[] = []
+  const get = (kind: 'comments' | 'posts') => arctic(kind).catch(e => { errors.push(String(e)); return [] as ArcticItem[] })
   // One after the other: two heavy queries at once is what trips its limiter.
-  const comments = await arctic('comments')
-  const posts = await arctic('posts')
+  const comments = await get('comments')
+  const posts = await get('posts')
   for (const c of comments) {
     if (!isCigFlair(c.author_flair_text) || !c.body || c.body === '[deleted]' || c.body === '[removed]') continue
     const ts = new Date(c.created_utc * 1000).toISOString()
@@ -242,5 +247,5 @@ export async function fetchRedditStaff(): Promise<DirectRow[]> {
       msg_timestamp: ts, ts_raw: ts, image: '',
     })
   }
-  return rows
+  return { rows, errors }
 }
