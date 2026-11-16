@@ -13,7 +13,7 @@ export type CategoryId =
   | 'yt-video' | 'yt-short' | 'twitter' | 'commlink'
   | 'dev-spectrum' | 'dev-reddit' | 'kb'
   | 'patch' | 'status' | 'store' | 'motd'
-  | 'news'
+  | 'roundup'
 
 export interface Category {
   id: CategoryId
@@ -37,7 +37,7 @@ export const CATEGORIES: Category[] = [
   { id: 'status',       group: 'Game and store',    label: 'Server status',           description: 'RSI Status incidents and maintenance',                     color: 0xef4444 },
   { id: 'store',        group: 'Game and store',    label: 'Store and ship upgrades', description: 'Pledge store, ship upgrade and merch changes',             color: 0xeab308 },
   { id: 'motd',         group: 'Game and store',    label: 'Testing chat MOTD',       description: 'PTU build status from the Spectrum testing chat',          color: 0xf59e0b },
-  { id: 'news',         group: 'Community',         label: 'News roundup (Pipeline)', description: 'Teasers, offers and newsletters, relayed by Pipeline',     color: 0x38bdf8 },
+  { id: 'roundup',      group: 'Community',         label: 'News roundup (Pipeline)', description: 'Teasers, offers and newsletters, relayed by Pipeline',     color: 0x38bdf8 },
 ]
 
 export const CATEGORY_IDS = CATEGORIES.map(c => c.id)
@@ -47,7 +47,7 @@ export const categoryById = new Map(CATEGORIES.map(c => [c.id, c]))
 // became. Used once per subscription by migrateCategories() in schema.ts. `dev` was the whole
 // TrackerSC channel, so it maps to every kind TrackerSC posts.
 export const LEGACY_CATEGORIES: Record<string, CategoryId[]> = {
-  news:     ['news', 'commlink'],
+  news:     ['roundup', 'commlink'],   // old id 'news' is never reused, so this stays idempotent
   spectrum: ['commlink'],
   dev:      ['commlink', 'store', 'dev-spectrum', 'dev-reddit', 'kb', 'status'],
   youtube:  ['yt-video', 'yt-short'],

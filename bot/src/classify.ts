@@ -53,7 +53,7 @@ export async function classify(row: MessageRow): Promise<Classified | null> {
       const id = youtubeId(row.url)
       if (id) return video(base, id)
       if (COMM_LINK_RE.test(row.url)) return { feed: 'commlink', card: 'generic', source: base }
-      return { feed: 'news', card: 'generic', source: base }
+      return { feed: 'roundup', card: 'generic', source: base }
     }
     case TRACKERSC: {
       const { kind, devName } = trackerKind(row)
@@ -82,7 +82,7 @@ export function channelsFor(feeds: CategoryId[]): string[] {
   const out = new Set<string>()
   const want = (f: CategoryId[]) => f.some(x => feeds.includes(x))
   if (want(['yt-video', 'yt-short'])) out.add('sc-youtube')
-  if (want(['news', 'commlink', 'yt-video', 'yt-short'])) out.add(PIPELINE_NEWS)
+  if (want(['roundup', 'commlink', 'yt-video', 'yt-short'])) out.add(PIPELINE_NEWS)
   if (want(['commlink', 'store', 'status', 'kb', 'dev-spectrum', 'dev-reddit'])) out.add(TRACKERSC)
   if (want(['patch'])) { out.add('1484315784816627903'); out.add('spectrum-patch-notes') }
   if (want(['commlink'])) out.add('spectrum-announce')
