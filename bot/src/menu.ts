@@ -3,8 +3,11 @@
 // exactly the roles they ticked, and each news post mentions its feed's role.
 //
 // Discord limits that shape this file:
-// - A button press does not carry what the member ticked in the dropdown. So the dropdown's
-//   own interaction is remembered per member (PENDING_TTL) and "Save my pings" applies it.
+// - A button press does not carry what the member ticked in the dropdown, and the pinned
+//   message is shared, so it can't change for one member. Picking therefore answers privately
+//   with what was ticked and its own Save button (the picks ride in its id); pressing it turns
+//   that reply into the result. The pinned Save also works for 15 min (PENDING_TTL) after a pick.
+//   Tested 2026-11-16: Sub's pinned-Save-only flow kept saying "tick the feeds first".
 // - Roles need Manage Roles. Without it, /feed menu explains what is missing and servers keep
 //   using /feed role (posts fall back to that whenever a server has no menu).
 // - The bot can only ping a role that is mentionable, unless it has Mention Everyone. So the
@@ -120,18 +123,21 @@ export async function menuCommand(i: ChatInputCommandInteraction<'cached'>, chan
   const subs = await db.select().from(subscriptions).where(eq(subscriptions.guildId, guild.id))
   const body = menuMessage(subs.map(s => s.channelId), channel.id)
 
-  let messageId: string | null = null
+  let msg: import('discord.js').Message | null = null
   if (existing?.channelId === channel.id) {
-    try { messageId = (await channel.messages.edit(existing.messageId, body)).id } catch { messageId = null }
+    try { msg = await channel.messages.edit(existing.messageId, body) } catch { msg = null }
   } else if (existing) {
     await deleteMenuMessage(guild, existing)
   }
+  if (!msg) msg = await channel.send(body)
+  const messageId = msg.id
   const notes: string[] = []
-  if (!messageId) {
-    const msg = await channel.send(body)
-    messageId = msg.id
-    try { await msg.pin('SC Feed ping menu') } catch {
-      notes.push('I couldn\'t pin it. Pin it yourself, or give me **Pin Messages** in that channel.')
+  // Also retried on a refresh, so granting Pin Messages later and re-running this fixes it.
+  if (!msg.pinned) {
+    try { await msg.pin('SC Feed ping menu') } catch (err) {
+      console.log(new Date().toISOString(), '[menu]', `pin failed in ${channel.id}: ${String((err as Error).message ?? err)}`)
+      notes.push('I couldn\'t pin it. Pin it yourself, or give me **Pin Messages** in that channel ' +
+        '(a channel override on @everyone can block it even when my role has it).')
     }
   }
 
@@ -190,19 +196,46 @@ async function applyFeeds(member: GuildMember, menu: Menu, feeds: CategoryId[]) 
   return failed
 }
 
-export async function handleMenuInteraction(i: StringSelectMenuInteraction<'cached'> | ButtonInteraction<'cached'>) {
-  const action = i.customId.slice(MENU_PREFIX.length)
-  const key = `${i.guildId}:${i.user.id}`
+// The feeds a member picked ride in the private Save button's id as a bitmask over CATEGORIES,
+// so that button works without the bot remembering anything (and across restarts).
+const encodeFeeds = (feeds: CategoryId[]) => CATEGORIES.reduce((n, c, idx) => feeds.includes(c.id) ? n | (1 << idx) : n, 0).toString(36)
+const decodeFeeds = (bits: string) => { const n = parseInt(bits, 36) || 0; return CATEGORIES.filter((_, idx) => n & (1 << idx)).map(c => c.id) }
 
+function resultText(feeds: CategoryId[], failed: string[]) {
+  const got = CATEGORIES.filter(c => feeds.includes(c.id) && !failed.includes(c.label)).map(c => c.label)
+  const lines = [got.length ? `You'll be pinged for: ${got.join(', ')}.` : "You won't be pinged for any SC Feed posts. They still show up in the channel."]
+  if (failed.length) {
+    lines.push(`I couldn't give you ${failed.join(', ')}. A server admin can fix it by running \`/feed menu\` again ` +
+      '(and keeping my role above the SC Feed roles).')
+  }
+  return lines.join('\n')
+}
+
+export async function handleMenuInteraction(i: StringSelectMenuInteraction<'cached'> | ButtonInteraction<'cached'>) {
+  const [action, bits] = i.customId.slice(MENU_PREFIX.length).split(':')
+  const key = `${i.guildId}:${i.user.id}`
+  console.log(new Date().toISOString(), '[menu]', `${action}${bits !== undefined ? `:${bits}` : ''}${i.isStringSelectMenu() ? ` [${i.values.join(',')}]` : ''} in ${i.guildId} by ${i.user.id}`)
+
+  // Picking in the dropdown answers privately with what was ticked and a Save button of its own.
+  // The pinned message is shared by everyone, so it can't change for one member; this reply can.
   if (i.isStringSelectMenu()) {
-    remember(key, i.values.filter((v): v is CategoryId => (CATEGORY_IDS as string[]).includes(v)))
-    await i.deferUpdate()
+    const feeds = i.values.filter((v): v is CategoryId => (CATEGORY_IDS as string[]).includes(v))
+    remember(key, feeds)
+    const names = CATEGORIES.filter(c => feeds.includes(c.id)).map(c => c.label)
+    await i.reply({
+      ...ephemeral,
+      content: names.length ? `You picked: ${names.join(', ')}.\nPress **Save my pings** to apply.`
+        : 'You picked no feeds. Press **Save my pings** to turn off all SC Feed pings.',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`${MENU_PREFIX}save:${encodeFeeds(feeds)}`).setStyle(ButtonStyle.Primary).setLabel('Save my pings'))],
+    })
     return
   }
 
   let feeds: CategoryId[]
   if (action === 'all') feeds = [...CATEGORY_IDS]
   else if (action === 'none') feeds = []
+  else if (bits !== undefined) feeds = decodeFeeds(bits)
   else {
     const p = pending.get(key)
     if (!p || Date.now() - p.at > PENDING_TTL) {
@@ -215,14 +248,11 @@ export async function handleMenuInteraction(i: StringSelectMenuInteraction<'cach
   const menu = (await db.select().from(menus).where(eq(menus.guildId, i.guildId)).limit(1))[0]
   if (!menu) { await i.reply({ ...ephemeral, content: 'This menu is no longer in use.' }); return }
 
-  await i.deferReply(ephemeral)
+  // The private Save button turns its own message into the result, so the button goes away.
+  const own = bits !== undefined
+  if (own) await i.deferUpdate()
+  else await i.deferReply(ephemeral)
   const failed = await applyFeeds(i.member, menu, feeds)
   pending.delete(key)
-  const got = CATEGORIES.filter(c => feeds.includes(c.id) && !failed.includes(c.label)).map(c => c.label)
-  const lines = [got.length ? `You'll be pinged for: ${got.join(', ')}.` : "You won't be pinged for any SC Feed posts. They still show up in the channel."]
-  if (failed.length) {
-    lines.push(`I couldn't give you ${failed.join(', ')}. A server admin can fix it by running \`/feed menu\` again ` +
-      '(and keeping my role above the SC Feed roles).')
-  }
-  await i.editReply(lines.join('\n'))
+  await i.editReply({ content: resultText(feeds, failed), components: [] })
 }
