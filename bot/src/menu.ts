@@ -136,8 +136,10 @@ export async function menuCommand(i: ChatInputCommandInteraction<'cached'>, chan
   if (!msg.pinned) {
     try { await msg.pin('SC Feed ping menu') } catch (err) {
       console.log(new Date().toISOString(), '[menu]', `pin failed in ${channel.id}: ${String((err as Error).message ?? err)}`)
-      notes.push('I couldn\'t pin it. Pin it yourself, or give me **Pin Messages** in that channel ' +
-        '(a channel override on @everyone can block it even when my role has it).')
+      // Measured 2026-11-16: pinning needs Read Message History as well as Pin Messages
+      // ("Missing Access" without it), and a channel override on @everyone can deny either.
+      notes.push('I couldn\'t pin it. Pin it yourself, or give me **Pin Messages** and **Read Message History** ' +
+        'in that channel (a channel override on @everyone can block them even when my role has them).')
     }
   }
 
