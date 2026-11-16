@@ -26,6 +26,12 @@ export default function BotPrivacyPage() {
             and the ID of the person who ran <code>/feed setup</code>.
           </li>
           <li>
+            <strong>Ping menu</strong> (if you post one): the menu&apos;s channel and message ID, the IDs of the roles the
+            bot created for it, and the ID of the person who ran <code>/feed menu</code>. Which members picked which
+            feeds is not stored: it lives in your server as their roles. A pick that has not been saved yet is held in
+            memory for 15 minutes, then forgotten.
+          </li>
+          <li>
             <strong>Delivery log</strong>: which news items were posted to which channel, with the ID of the posted
             message. This is what stops the bot posting the same item twice. Entries are deleted after 45 days.
           </li>
@@ -42,14 +48,16 @@ export default function BotPrivacyPage() {
           <li>Your member list or anyone&apos;s presence. It does not have those intents either.</li>
           <li>Direct messages. It never sends or reads DMs.</li>
           <li>Anything outside the channels you set up, beyond the channel and role names Discord shows it.</li>
+          <li>Anyone&apos;s roles, except its own SC Feed roles, and only when that member presses a button in the ping menu.</li>
         </ul>
       </Section>
 
       <Section title="Removing your data">
         <ul>
           <li><code>/feed remove</code> deletes that channel&apos;s settings and its delivery log immediately.</li>
+          <li><code>/feed menu remove:True</code> deletes the ping menu&apos;s settings. The roles stay in your server until you delete them.</li>
           <li>
-            Removing the bot from your server deletes all of that server&apos;s channel settings and delivery logs
+            Removing the bot from your server deletes all of that server&apos;s channel settings, ping menu settings and delivery logs
             immediately. The server ID, name and join/leave dates are kept as a record of past installs.
           </li>
           <li>

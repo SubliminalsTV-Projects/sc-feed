@@ -6,6 +6,8 @@ posts an embed for every new Star Citizen news item that reaches SC Feed.
 - **Discord app:** "SC Feed", id `1484283647027712232` (the bot user is `SC News#7087`; renaming a
   verified app's bot needs Discord support). Guild install only, scopes `bot applications.commands`,
   permissions `19456` (View Channels, Send Messages, Embed Links). No privileged intents.
+  The ping menu (`/feed menu`) also needs **Manage Roles**, and **Pin Messages** to pin itself. Without
+  Manage Roles the command explains what's missing and `/feed role` stays the way to ping.
 - **Invite:** https://discord.com/oauth2/authorize?client_id=1484283647027712232 (also on `/bot`).
 - **Public pages:** `/bot`, `/bot/privacy`, `/bot/terms` on sc-feed.subliminal.gg (in `app/bot/`).
 
@@ -20,10 +22,14 @@ and the cross-source dedupe key.
 |---|---|
 | `src/index.ts` | Client, events (join/leave/channel delete), shutdown |
 | `src/poller.ts` | Cursor loop, fan-out, dedupe, test posts |
-| `src/commands.ts` | `/feed setup · role · test · remove · status`, category picker. `/feed role` sets a default role or a per-category one (or mutes a category). Up to 5 channels per server. |
-| `src/embed.ts` | Row → embed + "Open in SC Feed" button |
-| `src/sources.ts` | Which scfeed channels are carried, and their categories and colours |
-| `src/schema.ts` | `feedbot.*` tables (Drizzle) + idempotent startup DDL |
+| `src/commands.ts` | `/feed setup · role · test · remove · status · menu`, category picker. `/feed role` sets a default role or a per-category one (or mutes a category). Up to 5 channels per server. |
+| `src/menu.ts` | The members' ping menu: `/feed menu` creates one role per feed and posts + pins a dropdown with Save / Everything / No pings. While a server has a menu, posts ping the feed's menu role instead of the `/feed role` mapping |
+| `src/sources.ts` | Which scfeed channels are carried, the feeds (categories) with their groups and colours, and how the pre-2026-11-16 categories map onto them |
+| `src/classify.ts` | Decides each row's feed and card: TrackerSC splits on `source` (Comm-Link, Store, Ship Upgrade, Merchandise, Dev Tracker, Knowledge Base, Status), dev posts on URL (Spectrum/Reddit), YouTube on the Shorts check |
+| `src/lookups.ts` | The two web lookups made per new item: is this video a Short, and a Comm-Link's opening paragraph |
+| `src/embed.ts` | Row → embed + "Open in SC Feed" button; dispatches to `cards.ts` |
+| `src/cards.ts` | One card per kind: dev post, Comm-Link, video, store |
+| `src/schema.ts` | `feedbot.*` tables (Drizzle) + idempotent startup DDL, incl. the one-time category migration |
 
 Imports sc-feed's Drizzle schema from `../lib/db.ts`. A column rename there breaks `npm run
 bot:typecheck` instead of silently breaking the bot.

@@ -10,7 +10,7 @@
 import { Client, Events, GatewayIntentBits } from 'discord.js'
 import { eq, sql as dsql } from 'drizzle-orm'
 import { db, sql } from '../../lib/db'
-import { guilds, migrate, subscriptions } from './schema'
+import { guilds, menus, migrate, subscriptions } from './schema'
 import { commandData, handleInteraction } from './commands'
 import { startPoller } from './poller'
 
@@ -47,11 +47,13 @@ client.on(Events.GuildCreate, safe(async g => {
 client.on(Events.GuildDelete, safe(async g => {
   log(`removed from ${g.id} (${g.name})`)
   await db.delete(subscriptions).where(eq(subscriptions.guildId, g.id))
+  await db.delete(menus).where(eq(menus.guildId, g.id))
   await db.update(guilds).set({ leftAt: new Date() }).where(eq(guilds.guildId, g.id))
 }))
 
 client.on(Events.ChannelDelete, safe(async ch => {
   await db.delete(subscriptions).where(eq(subscriptions.channelId, ch.id))
+  await db.delete(menus).where(eq(menus.channelId, ch.id))
 }))
 
 client.on(Events.InteractionCreate, i => { void handleInteraction(i, client.rest, allowlist) })

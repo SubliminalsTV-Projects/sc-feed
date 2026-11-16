@@ -17,9 +17,11 @@ import { Routes, DiscordAPIError, type REST } from 'discord.js'
 import { and, arrayContains, asc, desc, eq, gt, inArray, lt, max, sql as dsql } from 'drizzle-orm'
 import { db, messages, kbDiffs } from '../../lib/db'
 import { blindHash, decryptRow } from '../../lib/feed-crypt'
-import { deliveries, state, subscriptions } from './schema'
-import { SOURCES, type CategoryId, type Source } from './sources'
-import { buildPost, type KbInfo, type MessageRow } from './embed'
+import { deliveries, menus, state, subscriptions } from './schema'
+import { type CategoryId } from './sources'
+import { buildPost, type Extras, type KbInfo, type MessageRow } from './embed'
+import { channelsFor, classify, type Classified } from './classify'
+import { commLinkSummary } from './lookups'
 
 const POLL_MS = 60_000
 const FRESH_MS = 12 * 60 * 60 * 1000
@@ -27,7 +29,6 @@ const DEDUPE_WINDOW = dsql`now() - interval '48 hours'`
 const DELIVERY_RETENTION = dsql`now() - interval '45 days'`
 const MAX_PERMANENT_ERRORS = 3
 const SEND_CONCURRENCY = 10
-const KB_ARTICLE_RE = /support\.robertsspaceindustries\.com\/hc\/[^/]+\/articles\/\d+/
 const SPECTRUM_THREAD_RE = /robertsspaceindustries\.com\/spectrum\/.*\/thread\//
 
 // Discord error codes meaning "this channel will never accept our posts as configured".
@@ -70,22 +71,30 @@ function normUrl(u: string) {
   try {
     const url = new URL(u)
     for (const k of [...url.searchParams.keys()]) if (k.startsWith('utm_')) url.searchParams.delete(k)
-    return (url.host.replace(/^www\./, '') + url.pathname.replace(/\/+$/, '') + url.search).toLowerCase()
+    // Pipeline links RSI pages with a /en/ locale and RSI Status with /index.html; the
+    // direct sources don't. Strip both so the same story dedupes across sources.
+    const path = url.pathname.replace(/^\/[a-z]{2}(?=\/comm-link\/)/i, '').replace(/\/index\.html$/i, '').replace(/\/+$/, '')
+    return (url.host.replace(/^www\./, '') + path + url.search).toLowerCase()
   } catch { return u.toLowerCase() }
 }
 
-export function dedupeKey(row: MessageRow, source: Source, kb: KbInfo | null): string {
+export function dedupeKey(row: MessageRow, cls: Classified, kb: KbInfo | null): string {
   if (kb) return `kb:${kb.articleId}:${kb.stateSig}`
   // MOTD cards link to the patch-notes thread, so their URL would collide with the notes.
-  if (source.category === 'motd') return `title:${normTitle(row.title)}`
+  if (cls.card === 'motd') return `title:${normTitle(row.title)}`
   // Several dev replies share one Spectrum thread URL — each reply is its own item.
-  if (source.category === 'dev' && SPECTRUM_THREAD_RE.test(row.url)) return `msg:${row.msgId}`
+  if (cls.card === 'dev' && SPECTRUM_THREAD_RE.test(row.url)) return `msg:${row.msgId}`
+  // youtu.be/x, watch?v=x and shorts/x are one video.
+  if (cls.videoId) return `yt:${cls.videoId}`
   if (/^https?:\/\//i.test(row.url)) return `url:${normUrl(row.url)}`
-  return `title:${normTitle(row.title)}`
+  // TrackerSC store posts have neither a title nor a link; one shared key would let only
+  // the first of them through in any 48h.
+  const t = normTitle(row.title)
+  return t ? `title:${t}` : `msg:${row.msgId}`
 }
 
-async function kbInfoFor(row: MessageRow, source: Source): Promise<KbInfo | null> {
-  if (source.category !== 'dev' || !KB_ARTICLE_RE.test(row.url)) return null
+async function kbInfoFor(row: MessageRow, cls: Classified): Promise<KbInfo | null> {
+  if (cls.card !== 'kb') return null
   const r = await db.select().from(kbDiffs).where(eq(kbDiffs.msgId, row.msgId)).limit(1)
   const d = r[0]
   if (!d) return null
@@ -106,14 +115,16 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
   }))
 }
 
-// The category's own role if set ('' = muted), else the channel's default role.
-export function pingRole(sub: Pick<Subscription, 'roleId' | 'categoryRoles'>, category: CategoryId): string | null {
+// With a ping menu, the feed's menu role. Otherwise the /feed role mapping: the category's
+// own role if set ('' = muted), else the channel's default role.
+export function pingRole(sub: Pick<Subscription, 'roleId' | 'categoryRoles'>, category: CategoryId, menuRoles?: Record<string, string>): string | null {
+  if (menuRoles) return menuRoles[category] || null
   const own = sub.categoryRoles[category]
   return (own !== undefined ? own : sub.roleId) || null
 }
 
-function roleMention(sub: Subscription, category: CategoryId) {
-  const role = pingRole(sub, category)
+function roleMention(sub: Subscription, category: CategoryId, menuRoles?: Record<string, string>) {
+  const role = pingRole(sub, category, menuRoles)
   return role
     ? { content: `<@&${role}>`, allowed_mentions: { parse: [], roles: [role] } }
     : { allowed_mentions: { parse: [] } }
@@ -133,19 +144,25 @@ async function recordFailure(sub: Subscription, err: unknown) {
   log(`permanent failure ${count}/${MAX_PERMANENT_ERRORS} for channel ${sub.channelId}${paused ? ' — PAUSED' : ''}: ${msg}`)
 }
 
-async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promise<'stale' | void> {
-  const source = SOURCES[row.channelId]
-  if (!source) return
-  if (Date.now() - row.tsRaw.getTime() > FRESH_MS) return 'stale'
+async function extrasFor(row: MessageRow, cls: Classified): Promise<Extras> {
+  const kb = await kbInfoFor(row, cls)
+  const summary = cls.card === 'commlink' && !(row.body ?? '').trim() && /^https?:\/\//.test(row.url) ? await commLinkSummary(row.url) : ''
+  return { kb, summary }
+}
 
-  const kb = await kbInfoFor(row, source)
-  const rawKey = dedupeKey(row, source, kb)
+async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promise<'stale' | void> {
+  if (Date.now() - row.tsRaw.getTime() > FRESH_MS) return 'stale'
+  const cls = await classify(row)
+  if (!cls) return
+
+  const extras = await extrasFor(row, cls)
+  const rawKey = dedupeKey(row, cls, extras.kb)
   // Dedupe keys hold urls and titles, so they are stored as a keyed hash (lib/feed-crypt.ts).
   // The lookup also matches the raw form so rows written before encryption still dedupe;
   // they age out of the 48h window on their own.
   const key = blindHash(rawKey) ?? rawKey
   const keys = key === rawKey ? [key] : [key, rawKey]
-  const conds = [eq(subscriptions.paused, false), arrayContains(subscriptions.categories, [source.category])]
+  const conds = [eq(subscriptions.paused, false), arrayContains(subscriptions.categories, [cls.feed])]
   if (allowlist.length) conds.push(inArray(subscriptions.guildId, allowlist))
   const subs = await db.select().from(subscriptions).where(and(...conds))
   if (!subs.length) return
@@ -154,7 +171,9 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
     .where(and(inArray(deliveries.dedupeKey, keys), gt(deliveries.created, DEDUPE_WINDOW),
       inArray(deliveries.subscriptionId, subs.map(s => s.id))))).map(r => r.id))
 
-  const payload = buildPost(row, source, kb)
+  const payload = buildPost(row, cls, extras)
+  const guildMenus = new Map((await db.select({ guildId: menus.guildId, roles: menus.roles }).from(menus)
+    .where(inArray(menus.guildId, [...new Set(subs.map(s => s.guildId))]))).map(m => [m.guildId, m.roles]))
   let sent = 0
   await pool(subs.filter(s => !alreadyHave.has(s.id)), SEND_CONCURRENCY, async sub => {
     const claim = await db.insert(deliveries)
@@ -162,7 +181,7 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
       .onConflictDoNothing().returning({ id: deliveries.id })
     if (!claim.length) return
     try {
-      const res = await rest.post(Routes.channelMessages(sub.channelId), { body: { ...payload, ...roleMention(sub, source.category) } }) as { id: string }
+      const res = await rest.post(Routes.channelMessages(sub.channelId), { body: { ...payload, ...roleMention(sub, cls.feed, guildMenus.get(sub.guildId)) } }) as { id: string }
       await db.update(deliveries).set({ discordMessageId: res.id }).where(eq(deliveries.id, claim[0].id))
       if (sub.errorCount) {
         await db.update(subscriptions).set({ errorCount: 0, lastError: '', updated: new Date() }).where(eq(subscriptions.id, sub.id))
@@ -174,7 +193,7 @@ async function deliver(rest: REST, row: MessageRow, allowlist: string[]): Promis
     }
   })
   // No title here: container logs sit on the same unencrypted disk as the database.
-  log(`${row.channelId}/${row.msgId} → ${sent}/${subs.length} channels (${alreadyHave.size} already had it)`)
+  log(`${row.channelId}/${row.msgId} [${cls.feed}] → ${sent}/${subs.length} channels (${alreadyHave.size} already had it)`)
 }
 
 // ---------- loop ----------
@@ -225,19 +244,24 @@ export function startPoller(rest: REST, allowlist: string[]) {
 // ---------- test posts (/feed test) ----------
 
 // The newest carried item in any of these categories, for a "this is what it looks like" post.
-export async function latestRowFor(categories: CategoryId[]): Promise<MessageRow | null> {
-  const channels = Object.entries(SOURCES).filter(([, s]) => categories.includes(s.category)).map(([id]) => id)
+// Feeds are decided per row, so read a window of recent rows and take the first that fits.
+export async function latestRowFor(categories: CategoryId[]): Promise<{ row: MessageRow, cls: Classified } | null> {
+  const channels = channelsFor(categories)
   if (!channels.length) return null
-  const r = await db.select().from(messages).where(inArray(messages.channelId, channels))
-    .orderBy(desc(messages.tsRaw)).limit(1)
-  return r[0] ? decryptRow(r[0], r[0].msgId) : null
+  const rows = await db.select().from(messages).where(inArray(messages.channelId, channels))
+    .orderBy(desc(messages.tsRaw)).limit(60)
+  for (const raw of rows) {
+    const row = decryptRow(raw, raw.msgId)
+    const cls = await classify(row)
+    if (cls && categories.includes(cls.feed)) return { row, cls }
+  }
+  return null
 }
 
 export async function sendTestPost(rest: REST, channelId: string, categories: CategoryId[]) {
-  const row = await latestRowFor(categories)
-  if (!row) throw new Error('No items in the selected categories yet.')
-  const source = SOURCES[row.channelId]
-  const payload = buildPost(row, source, await kbInfoFor(row, source))
+  const hit = await latestRowFor(categories)
+  if (!hit) throw new Error('No items in the selected categories yet.')
+  const payload = buildPost(hit.row, hit.cls, await extrasFor(hit.row, hit.cls))
   await rest.post(Routes.channelMessages(channelId), {
     body: { ...payload, content: '-# Test post from SC Feed: new items will look like this.', allowed_mentions: { parse: [] } },
   })

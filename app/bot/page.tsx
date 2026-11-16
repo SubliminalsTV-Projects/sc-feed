@@ -24,14 +24,10 @@ export default function BotLandingPage() {
 
       <Section title="What it posts">
         <ul>
-          <li><strong>Star Citizen news</strong>: Comm-Links, This Week in Star Citizen, newsletters (via Pipeline)</li>
-          <li><strong>Patch notes</strong>: LIVE and PTU</li>
-          <li><strong>Dev tracker</strong>: CIG staff posts on Spectrum and Reddit, and Knowledge Base edits with what changed (via TrackerSC)</li>
-          <li><strong>Spectrum announcements</strong></li>
-          <li><strong>RSI on X</strong>: posts from @RobertsSpaceInd</li>
-          <li><strong>Server status</strong>: RSI Status incidents and maintenance</li>
-          <li><strong>Star Citizen YouTube</strong>: new videos on the official channel</li>
-          <li><strong>Testing chat MOTD</strong>: PTU build status</li>
+          <li><strong>Official channels</strong>: YouTube videos and Shorts, RSI on X, Comm-Links and Spectrum announcements</li>
+          <li><strong>Dev tracker</strong>: CIG staff posts on Spectrum and on Reddit, and Knowledge Base edits with what changed (via TrackerSC)</li>
+          <li><strong>Game and store</strong>: LIVE and PTU patch notes, RSI server status, pledge store and ship upgrade changes, and the testing chat MOTD</li>
+          <li><strong>News roundup</strong>: teasers, offers and newsletters (via Pipeline)</li>
         </ul>
         <p>When the same story arrives from two sources, your channel gets it once.</p>
       </Section>
@@ -40,13 +36,15 @@ export default function BotLandingPage() {
         <p>After adding the bot, someone with <strong>Manage Server</strong> runs:</p>
         <ul>
           <li><code>/feed setup channel:#news</code>: start posting in a channel, then pick categories</li>
-          <li><code>/feed role</code>: ping a role on each post, or a different role per category (optional; roles must be mentionable)</li>
+          <li><code>/feed menu channel:#news</code>: post a pinned menu where each member picks which feeds ping them (optional)</li>
+          <li><code>/feed role</code>: or choose one of your own roles to ping on each post, or per category (roles must be mentionable)</li>
           <li><code>/feed test</code>: post the newest item so you can see what it looks like</li>
           <li><code>/feed status</code> and <code>/feed remove</code></li>
         </ul>
         <p>
           The bot needs <strong>View Channel</strong>, <strong>Send Messages</strong> and <strong>Embed Links</strong> in
-          the channel. It asks for nothing else and never reads your messages.
+          the channel. The ping menu also needs <strong>Manage Roles</strong>, so the bot can create one role per feed and
+          give members the ones they pick, and <strong>Pin Messages</strong> to pin it. It never reads your messages.
         </p>
       </Section>
 

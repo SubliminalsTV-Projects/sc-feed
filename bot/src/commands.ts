@@ -7,6 +7,7 @@
 //   /feed test channel           post the newest item so admins see what it looks like
 //   /feed remove channel         stop posting there
 //   /feed status                 list this server's news channels
+//   /feed menu channel [remove]  post (or refresh, or take down) the members' ping menu (menu.ts)
 
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, InteractionContextType,
@@ -16,10 +17,11 @@ import {
 } from 'discord.js'
 import { and, count, eq } from 'drizzle-orm'
 import { db } from '../../lib/db'
-import { subscriptions } from './schema'
+import { menus, subscriptions } from './schema'
 import { CATEGORIES, CATEGORY_IDS, categoryById, type CategoryId } from './sources'
 import { sendTestPost } from './poller'
 import { SITE_URL } from './embed'
+import { MENU_PREFIX, handleMenuInteraction, menuCommand } from './menu'
 
 const MAX_CHANNELS_PER_GUILD = 5
 const BRAND_COLOR = 0x0ea5e9
@@ -55,6 +57,10 @@ export const commandData = new SlashCommandBuilder()
   .addSubcommand(s => s.setName('remove').setDescription('Stop posting news in a channel')
     .addChannelOption(channelOpt))
   .addSubcommand(s => s.setName('status').setDescription("List this server's news channels"))
+  .addSubcommand(s => s.setName('menu').setDescription('Post a menu where members pick which feeds ping them (needs Manage Roles)')
+    .addChannelOption(o => o.setName('channel').setDescription('Where to post the menu (usually your news channel)')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+    .addBooleanOption(o => o.setName('remove').setDescription('Take the menu down instead (the roles stay)')))
   .toJSON()
 
 // ---------- helpers ----------
@@ -132,6 +138,7 @@ async function onCommand(i: ChatInputCommandInteraction<'cached'>, rest: REST) {
   }
 
   const channel = i.options.getChannel('channel', true) as GuildBasedChannel
+  if (sub === 'menu') { await menuCommand(i, channel, missingPerms(channel)); return }
   const existing = await subForChannel(channel.id, i.guildId)
 
   if (sub === 'setup') {
@@ -184,6 +191,8 @@ async function onCommand(i: ChatInputCommandInteraction<'cached'>, rest: REST) {
         : role ? `${label} posts in ${channel} ping ${role}.`
         : `${label} posts in ${channel} use the default ping${existing.roleId ? ` (<@&${existing.roleId}>)` : ' (none set)'}.`
     }
+    const [menu] = await db.select({ g: menus.guildId }).from(menus).where(eq(menus.guildId, i.guildId)).limit(1)
+    if (menu) content += '\nℹ️ This server has a ping menu, so posts ping its roles instead. This takes effect if you remove the menu (`/feed menu remove:True`).'
     await i.reply({ ...ephemeral, content: content + (mute ? '' : roleWarning(channel, role)), allowedMentions: { parse: [] } })
   } else if (sub === 'test') {
     await i.deferReply(ephemeral)
@@ -224,6 +233,15 @@ export async function handleInteraction(i: Interaction, rest: REST, allowlist: s
   if (!i.inCachedGuild()) return
   if (allowlist.length && !allowlist.includes(i.guildId)) {
     if (i.isRepliable()) await i.reply({ ...ephemeral, content: 'SC Feed is not available in this server yet.' })
+    return
+  }
+  // The ping menu is for every member, so it is routed before the admin gate.
+  if ((i.isStringSelectMenu() || i.isButton()) && i.customId.startsWith(MENU_PREFIX)) {
+    try { await handleMenuInteraction(i) } catch (err) {
+      console.error(new Date().toISOString(), '[menu]', err)
+      const msg = { ...ephemeral, content: 'Something went wrong. Try again in a minute.' }
+      await (i.deferred || i.replied ? i.followUp(msg) : i.reply(msg)).catch(() => {})
+    }
     return
   }
   // Manage Server is the command's default gate, but menus and buttons bypass command

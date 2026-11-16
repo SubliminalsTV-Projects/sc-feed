@@ -1,8 +1,13 @@
 // Turns one scfeed message row into the Discord message the bot posts.
+//
+// Each kind of item that needs its own layout gets its own builder in cards.ts (the same rule
+// as sc-feed's display isolation: fixing one card must never change another). buildPost only
+// dispatches; the generic card below is the fallback for everything else.
 
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js'
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js'
 import type { messages } from '../../lib/db'
-import { categoryById, type Source } from './sources'
+import type { Classified } from './classify'
+import { SITE_URL, baseEmbed, clip, commLinkCard, devCard, isHttp, storeCard, videoCard } from './cards'
 
 export type MessageRow = typeof messages.$inferSelect
 
@@ -15,19 +20,13 @@ export interface KbInfo {
   previewHtml: string
 }
 
-export const SITE_URL = 'https://sc-feed.subliminal.gg'
-const ICON_URL = `${SITE_URL}/icons/icon-192.png`
-const DESCRIPTION_MAX = 400
-
-const isHttp = (u: string) => /^https?:\/\//i.test(u)
-
-function clip(text: string, max: number): string {
-  if (text.length <= max) return text
-  let out = text.slice(0, max).replace(/\s+\S*$/, '') + '…'
-  // A cut inside **bold** or ~~strike~~ would leave the marker showing as literal text.
-  for (const m of ['**', '~~']) if (out.split(m).length % 2 === 0) out += m
-  return out
+export interface Extras {
+  kb: KbInfo | null
+  summary: string   // Comm-Link summary (lookups.ts), '' when none
 }
+
+export { SITE_URL } from './cards'
+const DESCRIPTION_MAX = 400
 
 function unescapeHtml(s: string): string {
   return s.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) =>
@@ -56,19 +55,17 @@ function description(row: MessageRow, kb: KbInfo | null): string {
   return clip(body, DESCRIPTION_MAX)
 }
 
-export function buildPost(row: MessageRow, source: Source, kb: KbInfo | null) {
+function genericCard(row: MessageRow, cls: Classified, kb: KbInfo | null) {
+  const { source } = cls
   const [rawSource, devName] = (row.source ?? '').split('||')
   const author = devName ? `${source.label} · ${devName}`
     : source.spectrumAuthor && rawSource ? `${source.label} · ${rawSource}`
     : source.label
 
-  const embed = new EmbedBuilder()
-    .setColor(categoryById.get(source.category)!.color)
-    .setTimestamp(row.tsRaw)
-    .setFooter({ text: source.credit ? `SC Feed · ${source.credit}` : 'SC Feed', iconURL: ICON_URL })
+  const embed = baseEmbed(row, cls)
   // A MOTD is one block of text with no headline (its stored title is just the first 150
   // chars), so it gets no title: the author line names it and the body carries it whole.
-  const untitled = source.category === 'motd'
+  const untitled = cls.card === 'motd'
   embed.setAuthor({ name: author.slice(0, 256), ...(untitled && isHttp(row.url) ? { url: row.url } : {}) })
   if (!untitled) {
     embed.setTitle(clip(row.title.trim() || source.label, 256))
@@ -77,6 +74,16 @@ export function buildPost(row: MessageRow, source: Source, kb: KbInfo | null) {
   const desc = untitled ? clip((row.body || row.title).trim(), DESCRIPTION_MAX) : description(row, kb)
   if (desc) embed.setDescription(desc)
   if (isHttp(row.image)) embed.setImage(row.image)
+  return embed
+}
+
+export function buildPost(row: MessageRow, cls: Classified, extras: Extras) {
+  const embed =
+    cls.card === 'dev' ? devCard(row, cls)
+    : cls.card === 'commlink' ? commLinkCard(row, cls, extras.summary)
+    : cls.card === 'video' ? videoCard(row, cls)
+    : cls.card === 'store' ? storeCard(row, cls)
+    : genericCard(row, cls, extras.kb)
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open in SC Feed').setURL(SITE_URL),
